@@ -1,0 +1,68 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Database files
+*.sqlite3
+*.db
+*.sqlite
+
+# Log files
+*.log
+log/
+logs/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env*.local
+
+# Django stuff
+*.pot
+*.pyc
+*.pyo
+*.pyd
+.Python
+db.sqlite3
+db.sqlite3-journal
+
+# Static files (if not in version control)
+staticfiles/
+media/
+
+# Coverage files
+htmlcov/
+.coverage
+.coverage.*
+.cache
+
+# Node modules (if using Node.js)
+node_modules/
+
+# Build files
+build/
+dist/
