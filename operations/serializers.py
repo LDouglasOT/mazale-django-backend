@@ -3,9 +3,8 @@ from django.contrib.auth.hashers import make_password
 from .models import (
     User, ProfileLike, Match, Conversation, Message, 
     Moment, MomentLike, Comment, Gift, UserGift, 
-    Transaction, Withdrawal, Notification
+    Transaction, Withdrawal, Notification,ProfileView, UserInteraction, UserPreferenceProfile
 )
-
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
@@ -15,8 +14,15 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'phone_number', 'email', 'password', 'confirm_password',
-            'first_name', 'last_name', 'gender', 'day', 'month', 'year'
+            'first_name', 'last_name', 'gender', 'day', 'month', 'year',
+            'engagement_score', 'recommendation_boost', 'activity_level',
+            'compatibility_score', 'profile_completeness',
         ]
+        read_only_fields = [
+            'id', 'engagement_score', 'recommendation_boost',
+            'activity_level', 'compatibility_score', 'profile_completeness'
+        ]
+
 
     def validate(self, data):
         if data['password'] != data['confirm_password']:
@@ -224,3 +230,42 @@ class NotificationSerializer(serializers.ModelSerializer):
         model = Notification
         fields = ['id', 'user', 'header', 'message', 'is_global', 'seen', 'created_at']
         read_only_fields = ['id', 'created_at']
+
+
+class ProfileViewSerializer(serializers.ModelSerializer):
+    viewer_name = serializers.CharField(source='viewer.first_name', read_only=True)
+    viewed_user_name = serializers.CharField(source='viewed_user.first_name', read_only=True)
+    
+    class Meta:
+        model = ProfileView
+        fields = [
+            'id', 'viewer', 'viewer_name', 'viewed_user', 'viewed_user_name',
+            'view_duration', 'scrolled_to_bottom', 'viewed_images_count',
+            'clicked_social_links', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class UserInteractionSerializer(serializers.ModelSerializer):
+    target_user_name = serializers.CharField(source='target_user.first_name', read_only=True)
+    
+    class Meta:
+        model = UserInteraction
+        fields = [
+            'id', 'user', 'interaction_type', 'target_user',
+            'target_user_name', 'engagement_score', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class UserPreferenceProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserPreferenceProfile
+        fields = [
+            'id', 'user', 'age_preference_min', 'age_preference_max',
+            'distance_importance', 'activity_level_preference',
+            'avg_session_duration', 'preferred_time_of_day',
+            'swipe_rate', 'response_rate', 'total_engagement_score',
+            'interest_weights', 'personality_vector', 'updated_at'
+        ]
+        read_only_fields = ['id', 'updated_at']

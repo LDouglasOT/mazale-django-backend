@@ -88,6 +88,19 @@ class User(AbstractBaseUser,PermissionsMixin):
     supabase_id = models.CharField(max_length=255, null=True, blank=True)
     supabase_email = models.CharField(max_length=50, null=True, blank=True)
     
+    #Machine Learning at scale
+    engagement_score = models.FloatField(default=0, help_text="Overall user engagement score")
+    recommendation_boost = models.FloatField(default=1.0, help_text="Boost factor for recommendations")
+    last_recommendation_update = models.DateTimeField(null=True, blank=True)
+    activity_level = models.CharField(max_length=20, default='medium', choices=[
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+        ('very_high', 'Very High')
+    ])
+
+
+
     # Timestamps
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
@@ -398,3 +411,74 @@ class Notification(models.Model):
         if self.is_global:
             return f"Global Notification: {self.header or self.message[:30]}"
         return f"Notification for {self.user}: {self.header or self.message[:30]}"
+    
+
+class ProfileView(models.Model):
+    """Track profile viewing behavior"""
+    viewer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='profile_views_made')
+    viewed_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='profile_views_received')
+    view_duration = models.IntegerField(default=0, help_text="Duration in seconds")
+    scrolled_to_bottom = models.BooleanField(default=False)
+    viewed_images_count = models.IntegerField(default=0)
+    clicked_social_links = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Profile View"
+        verbose_name_plural = "Profile Views"
+
+
+class UserInteraction(models.Model):
+    """Track all user interactions for ML"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='interactions')
+    interaction_type = models.CharField(max_length=50, choices=[
+        ('profile_view', 'Profile View'),
+        ('like', 'Like'),
+        ('superlike', 'Superlike'),
+        ('pass', 'Pass'),
+        ('message_sent', 'Message Sent'),
+        ('moment_view', 'Moment View'),
+        ('moment_like', 'Moment Like'),
+        ('comment', 'Comment'),
+        ('gift_sent', 'Gift Sent'),
+    ])
+    target_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='interactions_received', null=True, blank=True)
+    engagement_score = models.FloatField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'interaction_type', '-created_at']),
+        ]
+
+
+class UserPreferenceProfile(models.Model):
+    """ML-generated preference profile"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='preference_profile')
+    
+    # Preference weights (0-1 scale)
+    age_preference_min = models.IntegerField(default=18)
+    age_preference_max = models.IntegerField(default=99)
+    distance_importance = models.FloatField(default=0.5)
+    activity_level_preference = models.FloatField(default=0.5)
+    
+    # Behavioral patterns
+    avg_session_duration = models.IntegerField(default=0, help_text="Average session in seconds")
+    preferred_time_of_day = models.CharField(max_length=20, default='evening')
+    swipe_rate = models.FloatField(default=0) 
+    response_rate = models.FloatField(default=0)
+    
+    # Engagement metrics
+    total_engagement_score = models.FloatField(default=0)
+    last_active = models.DateTimeField(auto_now=True)
+    
+    # Preference vectors (stored as JSON)
+    interest_weights = models.JSONField(default=dict, help_text="Interest preference weights")
+    personality_vector = models.JSONField(default=dict, help_text="Personality compatibility vector")
+    
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "User Preference Profile"
+        verbose_name_plural = "User Preference Profiles"

@@ -34,23 +34,28 @@ CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [
-                # Use Redis DB 0 for channels to keep it separate from Cache/Celery
-                "redis://127.0.0.1:6379/0", 
-            ],
-            # 1. Capacity: Increase from default 100 to 1500+ 
-            # This prevents "ChannelFull" errors during traffic spikes.
+            "hosts": [{
+                "address": "rediss://default:AdGbAAIncDFlNjQ4ZmI2MzZkM2E0M2JlODQ5ZjE2NGQ2ODYyNzA0NHAxNTM2NTk@one-perch-53659.upstash.io:6379",
+                "ssl_cert_reqs": None, # Required for SSL
+            }],
             "capacity": 2000, 
-            
-            # 2. Expiry: How long a message stays in Redis if no one picks it up.
-            # Default is 60s; 30s is often better for real-time chat to save RAM.
             "expiry": 30,
-            
-            # 3. Symmetric Encryption: Recommended for production.
-            # It encrypts the data sitting in Redis.
             "symmetric_encryption_keys": [SECRET_KEY],
         },
     },
+}
+
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "rediss://default:AdGbAAIncDFlNjQ4ZmI2MzZkM2E0M2JlODQ5ZjE2NGQ2ODYyNzA0NHAxNTM2NTk@one-perch-53659.upstash.io:6379/0",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "CONNECTION_POOL_KWARGS": {
+                "ssl_cert_reqs": None # Required for SSL
+            }
+        }
+    }
 }
 
 ASGI_APPLICATION = 'mazale.asgi.application'
@@ -255,3 +260,37 @@ PASSWORD_HASHERS = [
 # Media Files Configuration
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+ONESIGNAL_API_KEY = 'os_v2_app_ayawkbpqufhozphwet75dn2f6j4x4vz5ziueuwva5hshw2x6zi3zxs4ljpxttcid5m6mik6mfdgy5xixoh3lxtkvudryvkzx6xsnbli'
+
+# Celery Configuration
+CELERY_BROKER_URL = 'rediss://default:AdGbAAIncDFlNjQ4ZmI2MzZkM2E0M2JlODQ5ZjE2NGQ2ODYyNzA0NHAxNTM2NTk@one-perch-53659.upstash.io:6379'
+CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+
+# Required for Upstash/Managed Redis SSL connections
+CELERY_BROKER_USE_SSL = {
+    'ssl_cert_reqs': 'none'
+}
+CELERY_REDIS_BACKEND_USE_SSL = {
+    'ssl_cert_reqs': 'none'
+}
+
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+
+# Logging (Optional but recommended)
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+}

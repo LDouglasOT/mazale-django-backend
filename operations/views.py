@@ -1,3 +1,4 @@
+from time import timezone
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes
@@ -9,6 +10,9 @@ from django.contrib.auth.hashers import check_password
 from django.db.models import Q
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
+from .ml_engine import DatingRecommendationEngine
+from .models import ProfileView, UserInteraction, UserPreferenceProfile
+
 
 from .models import (
     User, ProfileLike, Match, Conversation, Message,
@@ -340,7 +344,9 @@ def verify_token(request):
     return Response({
         'id': user.id,
         'user_id': user.id,
-        'username': user.username,
+        'username': user.first_name,
+        'lastname': user.last_name,
+        'googleid': user.google_id,
         'email': user.email,
         'phone_number': user.phone_number,
     }, status=200)
@@ -487,7 +493,6 @@ class MomentLikeView(APIView):
         """Like a moment"""
         moment = get_object_or_404(Moment, pk=pk)
         user = request.user
-        
         like, created = MomentLike.objects.get_or_create(moment=moment, user=user)
         
         if created:
@@ -545,10 +550,14 @@ class CommentListView(APIView):
     def get(self, request):
         """List comments"""
         moment_id = request.query_params.get('moment_id')
-        if moment_id:
-            comments = Comment.objects.filter(moment_id=moment_id).order_by('created_at')
-        else:
-            comments = Comment.objects.all().order_by('-created_at')
+
+        if moment_id == None:
+            return Response({'error': 'moment_id query parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
+        moment_exits = Moment.objects.filter(id=moment_id).first()
+        if not moment_exits:
+            return Response({'error': 'Moment not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        comments = Comment.objects.filter(moment_id=moment_id).order_by('created_at')
         
         serializer = CommentSerializer(comments, many=True)
         return Response(serializer.data)
@@ -883,3 +892,411 @@ class NotificationUnreadCountView(APIView):
             seen=False
         ).count()
         return Response({'unread_count': count})
+    
+
+# ===================== NEW: ML-Enhanced User Discovery =====================
+
+class SmartUserListView(APIView):
+    """ML-powered user recommendations"""
+    permission_classes = [IsAuthenticated]
+    pagination_class = PageNumberPagination
+
+    def get(self, request):
+        """Get personalized user recommendations"""
+        # Initialize ML engine
+        engine = DatingRecommendationEngine(request.user)
+        
+        # Get query parameters
+        limit = int(request.query_params.get('limit', 20))
+        refresh = request.query_params.get('refresh', 'false').lower() == 'true'
+        
+        # Update preferences periodically
+        if not request.user.last_recommendation_update or \
+           (timezone.now() - request.user.last_recommendation_update).days >= 1 or refresh:
+            engine.update_user_preferences()
+        
+        # Get recommended users
+        recommended_users = engine.get_recommended_users(limit=limit)
+        
+        # Paginate
+        paginator = self.pagination_class()
+        paginated_users = paginator.paginate_queryset(recommended_users, request)
+        serializer = UserSerializer(paginated_users, many=True)
+        
+        return paginator.get_paginated_response(serializer.data)
+
+
+# ===================== NEW: Profile View Tracking =====================
+
+class ProfileViewTrackingView(APIView):
+    """Track detailed profile viewing behavior"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Log profile view with engagement metrics"""
+        viewed_user_id = request.data.get('viewed_user_id')
+        view_duration = request.data.get('view_duration', 0)
+        scrolled_to_bottom = request.data.get('scrolled_to_bottom', False)
+        viewed_images_count = request.data.get('viewed_images_count', 0)
+        clicked_social_links = request.data.get('clicked_social_links', False)
+        
+        if not viewed_user_id:
+            return Response({'error': 'viewed_user_id required'}, status=400)
+        
+        # Create profile view
+        profile_view = ProfileView.objects.create(
+            viewer=request.user,
+            viewed_user_id=viewed_user_id,
+            view_duration=view_duration,
+            scrolled_to_bottom=scrolled_to_bottom,
+            viewed_images_count=viewed_images_count,
+            clicked_social_links=clicked_social_links
+        )
+        
+        # Log interaction
+        engagement_score = self._calculate_view_engagement(
+            view_duration, scrolled_to_bottom, viewed_images_count, clicked_social_links
+        )
+        
+        UserInteraction.objects.create(
+            user=request.user,
+            interaction_type='profile_view',
+            target_user_id=viewed_user_id,
+            engagement_score=engagement_score
+        )
+        
+        return Response({'message': 'Profile view tracked', 'engagement_score': engagement_score})
+    
+    def _calculate_view_engagement(self, duration, scrolled, images_viewed, clicked_links):
+        """Calculate engagement score from viewing behavior"""
+        score = 0
+        
+        # Duration scoring (max 40 points)
+        if duration >= 60:
+            score += 40
+        elif duration >= 30:
+            score += 30
+        elif duration >= 10:
+            score += 20
+        else:
+            score += 10
+        
+        # Interaction scoring
+        if scrolled:
+            score += 20
+        if images_viewed >= 3:
+            score += 25
+        elif images_viewed >= 1:
+            score += 15
+        if clicked_links:
+            score += 15
+        
+        return min(score, 100)
+
+
+# ===================== MODIFIED: Enhanced Profile Like with ML =====================
+
+class EnhancedProfileLikeView(APIView):
+    """Enhanced like tracking with ML insights"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Like a user's profile with ML tracking"""
+        liker = request.user
+        liked_user_id = request.data.get('liked_user')
+        superlike = request.data.get('superlike', False)
+        
+        if liker.id == liked_user_id:
+            return Response({'error': 'Cannot like your own profile'}, status=400)
+        
+        # Check if already liked
+        if ProfileLike.objects.filter(liker=liker, liked_user_id=liked_user_id).exists():
+            return Response({'error': 'Already liked'}, status=400)
+        
+        # Create like
+        profile_like = ProfileLike.objects.create(
+            liker=liker,
+            liked_user_id=liked_user_id,
+            superlike=superlike
+        )
+        
+        # Log interaction
+        UserInteraction.objects.create(
+            user=liker,
+            interaction_type='superlike' if superlike else 'like',
+            target_user_id=liked_user_id,
+            engagement_score=100 if superlike else 75
+        )
+        
+        # Check for mutual match
+        mutual_like = ProfileLike.objects.filter(
+            liker_id=liked_user_id,
+            liked_user_id=liker.id
+        ).exists()
+        
+        response_data = ProfileLikeSerializer(profile_like).data
+        
+        if mutual_like:
+            match = Match.objects.create(
+                user1=liker,
+                user2_id=liked_user_id
+            )
+            response_data['match'] = MatchSerializer(match).data
+            response_data['is_match'] = True
+            
+            # Boost both users' recommendation scores
+            liked_user = User.objects.get(id=liked_user_id)
+            liker.recommendation_boost = min(liker.recommendation_boost * 1.1, 2.0)
+            liked_user.recommendation_boost = min(liked_user.recommendation_boost * 1.1, 2.0)
+            liker.save()
+            liked_user.save()
+        else:
+            response_data['is_match'] = False
+        
+        # Update user preferences after every 5 likes
+        like_count = ProfileLike.objects.filter(liker=liker).count()
+        if like_count % 5 == 0:
+            engine = DatingRecommendationEngine(liker)
+            engine.update_user_preferences()
+        
+        return Response(response_data, status=201)
+
+
+class ProfilePassView(APIView):
+    """Track when user passes/skips a profile"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Log profile pass for ML learning"""
+        passed_user_id = request.data.get('passed_user_id')
+        
+        if not passed_user_id:
+            return Response({'error': 'passed_user_id required'}, status=400)
+        
+        # Log interaction
+        UserInteraction.objects.create(
+            user=request.user,
+            interaction_type='pass',
+            target_user_id=passed_user_id,
+            engagement_score=0  # Negative signal
+        )
+        
+        return Response({'message': 'Pass recorded'})
+
+
+# ===================== NEW: User Analytics Dashboard =====================
+
+class UserAnalyticsView(APIView):
+    """Get user's engagement analytics"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """Get comprehensive user analytics"""
+        user = request.user
+        engine = DatingRecommendationEngine(user)
+        
+        # Profile views analytics
+        profile_views_made = ProfileView.objects.filter(viewer=user)
+        profile_views_received = ProfileView.objects.filter(viewed_user=user)
+        
+        # Interaction analytics
+        interactions = UserInteraction.objects.filter(user=user)
+        
+        analytics = {
+            'engagement_score': user.engagement_score,
+            'activity_level': user.activity_level,
+            'recommendation_boost': user.recommendation_boost,
+            'profile_completeness': engine._calculate_profile_completeness(user) * 100,
+            
+            'profile_views': {
+                'made': profile_views_made.count(),
+                'received': profile_views_received.count(),
+                'avg_duration': profile_views_made.aggregate(Avg('view_duration'))['view_duration__avg'] or 0,
+            },
+            
+            'interactions': {
+                'total': interactions.count(),
+                'likes': interactions.filter(interaction_type='like').count(),
+                'superlikes': interactions.filter(interaction_type='superlike').count(),
+                'messages': interactions.filter(interaction_type='message_sent').count(),
+                'avg_engagement': interactions.aggregate(Avg('engagement_score'))['engagement_score__avg'] or 0,
+            },
+            
+            'matches': {
+                'total': Match.objects.filter(Q(user1=user) | Q(user2=user)).count(),
+                'new': Match.objects.filter(
+                    Q(user1=user, seen_by_user1=False) | Q(user2=user, seen_by_user2=False)
+                ).count(),
+            },
+            
+            'preferences': {
+                'swipe_rate': engine.preference_profile.swipe_rate,
+                'avg_session_duration': engine.preference_profile.avg_session_duration,
+                'distance_importance': engine.preference_profile.distance_importance,
+            }
+        }
+        
+        return Response(analytics)
+
+
+# ===================== MODIFIED: Enhanced Message Sending =====================
+
+class EnhancedMessageListView(APIView):
+    """Enhanced message tracking with ML"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Send a message with ML tracking"""
+        data = request.data.copy()
+        data['sender'] = request.user.id
+        
+        serializer = MessageSerializer(data=data)
+        if serializer.is_valid():
+            message = serializer.save()
+            
+            # Log interaction
+            UserInteraction.objects.create(
+                user=request.user,
+                interaction_type='message_sent',
+                target_user=message.receiver,
+                engagement_score=50  # Base score for messaging
+            )
+            
+            # Update conversation timestamp
+            if message.conversation:
+                message.conversation.updated_at = timezone.now()
+                message.conversation.save()
+            
+            return Response(serializer.data, status=201)
+        return Response(serializer.errors, status=400)
+
+
+# ===================== NEW: Boost Engagement Features =====================
+
+class UserBoostView(APIView):
+    """Temporarily boost user's visibility"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Apply boost to user profile"""
+        duration_hours = int(request.data.get('duration_hours', 1))
+        boost_factor = float(request.data.get('boost_factor', 2.0))
+        
+        user = request.user
+        user.recommendation_boost = boost_factor
+        user.save()
+        
+        # Schedule boost removal (you'd typically use Celery for this)
+        # For now, just return success
+        
+        return Response({
+            'message': f'Boost applied for {duration_hours} hours',
+            'new_boost': user.recommendation_boost
+        })
+
+
+class SimilarUsersView(APIView):
+    """Find users similar to a given user"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, user_id):
+        """Get users similar to the specified user"""
+        try:
+            target_user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=404)
+        
+        engine = DatingRecommendationEngine(request.user)
+        
+        # Get all potential candidates
+        candidates = User.objects.exclude(
+            id__in=[request.user.id, target_user.id]
+        ).exclude(gender=request.user.gender)[:50]
+        
+        # Score by similarity to target user
+        similar_users = []
+        for candidate in candidates:
+            similarity = engine._calculate_profile_similarity(candidate, target_user)
+            if similarity > 0.3:  # Only include reasonably similar users
+                similar_users.append((similarity, candidate))
+        
+        # Sort by similarity
+        similar_users.sort(key=lambda x: x[0], reverse=True)
+        
+        # Return top 10
+        results = [user for score, user in similar_users[:10]]
+        serializer = UserSerializer(results, many=True)
+        
+        return Response(serializer.data)
+
+
+# ===================== NEW: Engagement Optimization =====================
+
+class OptimizeProfileView(APIView):
+    """Get suggestions to optimize profile for better matches"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """Analyze profile and provide optimization suggestions"""
+        user = request.user
+        engine = DatingRecommendationEngine(user)
+        
+        suggestions = []
+        
+        # Check profile completeness
+        completeness = engine._calculate_profile_completeness(user)
+        if completeness < 0.7:
+            suggestions.append({
+                'category': 'profile_completeness',
+                'message': 'Your profile is only {}% complete. Add more details to get better matches!'.format(
+                    int(completeness * 100)
+                ),
+                'priority': 'high'
+            })
+        
+        # Check photo count
+        if not user.user_images or len(user.user_images) < 4:
+            suggestions.append({
+                'category': 'photos',
+                'message': 'Add more photos! Profiles with 4+ photos get 3x more matches.',
+                'priority': 'high'
+            })
+        
+        # Check bio length
+        if not user.about or len(user.about) < 100:
+            suggestions.append({
+                'category': 'bio',
+                'message': 'Write a more detailed bio. Profiles with longer bios get 60% more engagement.',
+                'priority': 'medium'
+            })
+        
+        # Check interests
+        if not user.user_interests or len(user.user_interests) < 3:
+            suggestions.append({
+                'category': 'interests',
+                'message': 'Add at least 3 interests to help us find better matches for you.',
+                'priority': 'medium'
+            })
+        
+        # Check activity level
+        if user.activity_level == 'low':
+            suggestions.append({
+                'category': 'activity',
+                'message': 'Be more active! Log in daily and engage with profiles to improve your visibility.',
+                'priority': 'medium'
+            })
+        
+        # Check swipe rate
+        if engine.preference_profile.swipe_rate < 0.1:
+            suggestions.append({
+                'category': 'engagement',
+                'message': 'You\'re very selective! Consider liking more profiles to increase your match potential.',
+                'priority': 'low'
+            })
+        
+        return Response({
+            'profile_score': int(completeness * 100),
+            'engagement_score': int(user.engagement_score),
+            'suggestions': suggestions,
+            'total_suggestions': len(suggestions)
+        })

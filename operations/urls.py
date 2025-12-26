@@ -1,5 +1,7 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
+
+from .notifications import TestNotificationAllView, TestNotificationSpecificView
 from .views import (
     # Authentication
     register_user, login_user, logout_user,
@@ -43,6 +45,15 @@ from .views import (
     # Notifications
     NotificationListView, NotificationDetailView, NotificationMarkSeenView,
     NotificationMarkAllSeenView, NotificationUnreadCountView,
+    SmartUserListView,
+    ProfileViewTrackingView,
+    EnhancedProfileLikeView,
+    ProfilePassView,
+    UserAnalyticsView,
+    EnhancedMessageListView,
+    UserBoostView,
+    SimilarUsersView,
+    OptimizeProfileView,
 )
 
 urlpatterns = [
@@ -111,10 +122,26 @@ urlpatterns = [
     path('withdrawals/pending/', WithdrawalPendingView.as_view(), name='withdrawal-pending'),
     path('withdrawals/approved/', WithdrawalApprovedView.as_view(), name='withdrawal-approved'),
     
-    # ===================== Notifications =====================
-    path('notifications/', NotificationListView.as_view(), name='notification-list'),
-    path('notifications/<int:pk>/', NotificationDetailView.as_view(), name='notification-detail'),
-    path('notifications/<int:pk>/mark-seen/', NotificationMarkSeenView.as_view(), name='notification-mark-seen'),
-    path('notifications/mark-all-seen/', NotificationMarkAllSeenView.as_view(), name='notification-mark-all-seen'),
-    path('notifications/unread-count/', NotificationUnreadCountView.as_view(), name='notification-unread-count'),
+    # ===================== ENHANCED ML ENGINE =====================
+    path('users/smart/', SmartUserListView.as_view(), name='smart-user-list'),
+    path('users/analytics/', UserAnalyticsView.as_view(), name='user-analytics'),
+    path('users/optimize-profile/', OptimizeProfileView.as_view(), name='optimize-profile'),
+    path('users/boost/', UserBoostView.as_view(), name='user-boost'),
+    path('users/<int:user_id>/similar/', SimilarUsersView.as_view(), name='similar-users'),
+    
+    # Profile Interaction Tracking
+    path('profile-views/track/', ProfileViewTrackingView.as_view(), name='track-profile-view'),
+    path('profile-likes/enhanced/', EnhancedProfileLikeView.as_view(), name='enhanced-profile-like'),
+    path('profile-pass/', ProfilePassView.as_view(), name='profile-pass'),
+    
+    # Enhanced messaging
+    path('messages/enhanced/', EnhancedMessageListView.as_view(), name='enhanced-messages'),
+
+    # ===================== Test Notifications =====================
+    path('notifications/test-all/', TestNotificationAllView.as_view(), name='test-notification-all'),
+    path('notifications/test-specific/', TestNotificationSpecificView.as_view(), name='test-notification-specific'),
+
+
+
+
 ]
