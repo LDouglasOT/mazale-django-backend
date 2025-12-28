@@ -5,8 +5,10 @@ from django.utils import timezone
 from datetime import timedelta
 from .models import User,UserInteraction, ProfileView, ProfileLike, Message
 from .ml_engine import DatingRecommendationEngine
-from celery import shared_task
 from django.utils import timezone
+from django.db import transaction
+from django.db.models import Count
+from .models import Message, Conversation
 
 @shared_task
 def update_all_user_preferences():
@@ -177,7 +179,7 @@ def update_online_status(user_id, is_online):
         
         # If online status is directly on your User model (mazale project uses operations.User):
         User.objects.filter(id=user_id).update(
-            is_online=is_online, 
+            online=is_online, 
             last_login=timezone.now() if is_online else timezone.now()
         )
         return f"User {user_id} status updated to {'Online' if is_online else 'Offline'}"
@@ -189,34 +191,74 @@ def update_online_status(user_id, is_online):
 @shared_task(name='chat.tasks.save_message_to_db')
 def save_message_to_db(data):
     """
-    Background task to save chat messages matching the 'sms' field schema.
+    Background task to save chat messages. 
+    Identifies or creates a conversation based on sender/receiver IDs.
     """
     try:
+        sender_id = data.get('sender_id')
+        receiver_id = data.get('receiver_id')
+
+        # 1. Identify the conversation containing both participants
+        # We filter for conversations that have both IDs in the participants list
+        conversation = Conversation.objects.filter(participants__id=sender_id) \
+            .filter(participants__id=receiver_id) \
+            .distinct() \
+            .first()
+
+        # 2. If no conversation exists, create one (optional, depending on your flow)
+        if not conversation:
+            with transaction.atomic():
+                conversation = Conversation.objects.create()
+                conversation.participants.add(sender_id, receiver_id)
+
+        # 3. Create the message
         Message.objects.create(
-            conversation_id=data.get('conversation_id'),
-            sender_id=data.get('sender_id'),
-            receiver_id=data.get('receiver_id'),
-            sms=data.get('sms', ''),  # Your model uses 'sms' instead of 'content'
+            conversation=conversation,
+            sender_id=sender_id,
+            receiver_id=receiver_id,
+            sms=data.get('sms', ''),
             seen=data.get('seen', False),
             is_image=data.get('is_image', False),
             is_text=data.get('is_text', True),
-            # Gift Fields
             gift=data.get('gift', False),
             gift_image=data.get('gift_image'),
             price=data.get('price'),
             quantity=data.get('quantity'),
         )
-        return f"Message saved successfully."
+        
+        return f"Message saved to Conversation {conversation.id}"
+
     except Exception as e:
         return f"Error saving message: {str(e)}"
 
 @shared_task(name='chat.tasks.update_online_status')
 def update_online_status(user_id, is_online):
     """Updates online status on the custom User model."""
-    User.objects.filter(id=user_id).update(is_online=is_online)
+    User.objects.filter(id=user_id).update(online=is_online)
     return f"User {user_id} online: {is_online}"
 
 @shared_task(name='chat.tasks.mark_as_seen')
-def mark_as_seen(message_id, user_id):
+def mark_as_seen(reciever, user_id):
     """Updates the 'seen' field as per your model."""
-    Message.objects.filter(id=message_id, receiver_id=user_id).update(seen=True)
+    try:
+        # 1. Identify the conversation containing both participants
+        # We filter for conversations that have both IDs in the participants list
+        conversation = Conversation.objects.filter(participants__id=user_id) \
+            .filter(participants__id=reciever) \
+            .distinct() \
+            .first()
+
+        # 2. If no conversation exists, create one (optional, depending on your flow)
+        if not conversation:
+            with transaction.atomic():
+                conversation = Conversation.objects.create()
+                conversation.participants.add(user_id, reciever)
+        updated_count = Message.objects.filter(
+            conversation_id=conversation.id,
+            sender=user_id,
+            seen=False           
+        ).update(seen=True)
+        
+        return updated_count
+    except Exception as e:
+        return f"Status update failed: {str(e)}"

@@ -1,3 +1,4 @@
+import json
 from time import timezone
 from rest_framework import status
 from rest_framework.views import APIView
@@ -11,6 +12,10 @@ from django.db.models import Q
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
 from .ml_engine import DatingRecommendationEngine
+
+import requests
+import redis
+from rest_framework import status
 from .models import ProfileView, UserInteraction, UserPreferenceProfile
 
 
@@ -1300,3 +1305,97 @@ class OptimizeProfileView(APIView):
             'suggestions': suggestions,
             'total_suggestions': len(suggestions)
         })
+
+redis_client = redis.from_url(
+    'rediss://default:AdGbAAIncDFlNjQ4ZmI2MzZkM2E0M2JlODQ5ZjE2NGQ2ODYyNzA0NHAxNTM2NTk@one-perch-53659.upstash.io:6379',
+    ssl_cert_reqs=None,
+    decode_responses=True
+)
+
+
+class SocketHandshakeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            user = request.user
+            auth_header = request.headers.get('Authorization', '').split()
+            if not auth_header or len(auth_header) < 2:
+                return Response({"error": "No token found"}, status=400)
+            
+            token = auth_header[1]
+            
+            # 2. Prepare the payload for Node.js
+            # Ensure keys match exactly what your Node.js code expects
+            user_data = {
+                "id": user.id,
+                "first_name": user.first_name or user.username,
+                "profile_pic": getattr(user, 'profile_pic_url', '') # Adapt to your model
+            }
+            redis_key = f"session:{token}"
+            redis_client.setex(
+                redis_key,
+                86400,
+                json.dumps(user_data)
+            )
+
+            return Response({
+                "message": "Socket session seeded",
+                "token": token
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+   
+    
+class SMSDeliveryEngine(APIView):
+    def post(self, request):
+        """
+        Sends an SMS via SmsNative HTTP API and returns a proper DRF Response.
+        """
+        mobile = request.data.get("mobile")
+        message = request.data.get("message")
+        
+        # Validation
+        if not mobile or not message:
+            return Response(
+                {"error": "Mobile and message fields are required."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        url = "http://www.smsnative.com/sendsms.php"
+        params = {
+            "user": "Mazale",
+            "password": "jklasdzc.@Ll6442369123..",
+            "mobile": mobile,
+            "senderid": "Mazale",
+            "message": message,
+        }
+        
+        try:
+            response = requests.get(url, params=params)
+            
+            # Success logic
+            if "1111" in response.text:
+                return Response({
+                    "success": True,
+                    "message": "SMS Sent Successfully",
+                    "details": response.text
+                }, status=status.HTTP_200_OK)
+            
+            # API Error logic (e.g., Insufficient credits, invalid login)
+            return Response({
+                "success": False,
+                "error": "SMS Provider Error",
+                "details": response.text
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response({
+                "success": False,
+                "error": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

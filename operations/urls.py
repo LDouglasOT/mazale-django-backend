@@ -4,7 +4,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from .notifications import TestNotificationAllView, TestNotificationSpecificView
 from .views import (
     # Authentication
-    register_user, login_user, logout_user,
+    SMSDeliveryEngine, register_user, login_user, logout_user,
     
     # Users
     UserListView, UserProfileUpdateView,verify_token,
@@ -41,7 +41,8 @@ from .views import (
     # Withdrawals
     WithdrawalListView, WithdrawalDetailView, WithdrawalPendingView, 
     WithdrawalApprovedView,
-    
+    # Socket Handshake
+    SocketHandshakeView,
     # Notifications
     NotificationListView, NotificationDetailView, NotificationMarkSeenView,
     NotificationMarkAllSeenView, NotificationUnreadCountView,
@@ -140,7 +141,10 @@ urlpatterns = [
     # ===================== Test Notifications =====================
     path('notifications/test-all/', TestNotificationAllView.as_view(), name='test-notification-all'),
     path('notifications/test-specific/', TestNotificationSpecificView.as_view(), name='test-notification-specific'),
-
+    
+    path('chat/handshake/', SocketHandshakeView.as_view(), name='socket-handshake'),
+    # ===================== SMS DELIVERY ENGINE =====================
+    path('sms/', SMSDeliveryEngine.as_view(), name='sms-engine'),
 
 
 
