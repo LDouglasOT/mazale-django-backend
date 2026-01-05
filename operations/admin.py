@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import (
     User, ProfileLike, Match, Conversation, Message,
     Moment, MomentLike, Comment, Gift, UserGift,
-    Transaction, Withdrawal, Notification
+    Transaction, Withdrawal, Notification,PhoneOTP
 )
 
 
@@ -156,3 +156,16 @@ class NotificationAdmin(admin.ModelAdmin):
     def message_preview(self, obj):
         return obj.message[:50] + '...' if len(obj.message) > 50 else obj.message
     message_preview.short_description = 'Message'
+
+
+@admin.register(PhoneOTP)
+class PhoneOTPAdmin(admin.ModelAdmin):
+    list_display = ['id', 'phone_number', 'otp_code', 'created_at', 'expires_at', 'is_expired']
+    list_filter = ['created_at', 'expires_at']
+    search_fields = ['phone_number', 'otp_code']
+    readonly_fields = ['id', 'created_at', 'expires_at', 'otp_code']
+
+    def is_expired(self, obj):
+        return obj.is_expired()
+    is_expired.boolean = True
+    is_expired.short_description = 'Expired'

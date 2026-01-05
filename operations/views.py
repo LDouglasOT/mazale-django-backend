@@ -1,5 +1,5 @@
 import json
-from time import timezone
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes
@@ -11,12 +11,128 @@ from django.contrib.auth.hashers import check_password
 from django.db.models import Q
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
-from .ml_engine import DatingRecommendationEngine
 
+
+class CustomPageNumberPagination(PageNumberPagination):
+    def get_paginated_response(self, data):
+        response = super().get_paginated_response(data)
+        response.data['page'] = self.page.number
+        response.data['page_size'] = self.page.paginator.per_page
+        return response
+# from .ml_engine import DatingRecommendationEngine
+from firebase_admin import credentials, storage,auth
+import os
+import os
+from datetime import datetime
 import requests
 import redis
 from rest_framework import status
-from .models import ProfileView, UserInteraction, UserPreferenceProfile
+from urllib.parse import quote
+from .models import ProfileView, UserInteraction, UserPreferenceProfile, PhoneOTP
+
+
+def send_sms_native(mobile, message, senderid="Mazale", schedule=None, unicode=None, group_id=None):
+    """
+    Send SMS using SmsNative API following their documentation.
+    Builds the URL directly as shown in the documentation example.
+
+    Parameters:
+    - mobile: Single number or comma-separated numbers (e.g., "256750123456" or "256750123456,256701123456")
+    - message: The SMS message text
+    - senderid: Sender name (default: "Mazale")
+    - schedule: Optional scheduling in format "yyyy:mm:dd:hh:mm:ss"
+    - unicode: Optional unicode setting (1 or 2)
+    - group_id: Optional group IDs for sending to groups
+
+    Returns:
+    - dict: Response with success status and details
+    """
+    # Build URL directly as per documentation
+    base_url = "http://www.smsnative.com/sendsms.php"
+    params = f"user=Mazale&password=jklasdzc.@Ll6442369123..&mobile={mobile}&senderid={senderid}&message={message}"
+
+    # Add optional parameters
+    if group_id:
+        params += f"&group_id={group_id}"
+    if unicode:
+        params += f"&unicode={unicode}"
+    if schedule:
+        params += f"&schedule={schedule}"
+
+    full_url = f"{base_url}?{params}"
+
+    try:
+        response = requests.get(full_url)
+
+        # Check response codes as per SmsNative documentation
+        if "1111" in response.text:
+            return {
+                "success": True,
+                "message": "SMS Submitted Successfully",
+                "response_code": "1111",
+                "details": response.text
+            }
+        elif "1001" in response.text:
+            return {
+                "success": False,
+                "error": "Invalid URL",
+                "response_code": "1001",
+                "details": response.text
+            }
+        elif "1005" in response.text:
+            return {
+                "success": False,
+                "error": "Invalid username or password",
+                "response_code": "1005",
+                "details": response.text
+            }
+        elif "1010" in response.text:
+            return {
+                "success": False,
+                "error": "Account expired",
+                "response_code": "1010",
+                "details": response.text
+            }
+        elif "1015" in response.text:
+            return {
+                "success": False,
+                "error": "Insufficient SMS Credits",
+                "response_code": "1015",
+                "details": response.text
+            }
+        elif "1020" in response.text:
+            return {
+                "success": False,
+                "error": "Invalid Sender",
+                "response_code": "1020",
+                "details": response.text
+            }
+        elif "1025" in response.text:
+            return {
+                "success": False,
+                "error": "Invalid Schedule Time",
+                "response_code": "1025",
+                "details": response.text
+            }
+        elif "1050" in response.text:
+            return {
+                "success": False,
+                "error": "Other error",
+                "response_code": "1050",
+                "details": response.text
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Unknown response",
+                "details": response.text
+            }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 from .models import (
@@ -30,34 +146,212 @@ from .serializers import (
     ConversationSerializer, MessageSerializer, MomentSerializer,
     MomentLikeSerializer, CommentSerializer, GiftSerializer,
     UserGiftSerializer, TransactionSerializer, WithdrawalSerializer,
-    NotificationSerializer
+    NotificationSerializer, PhoneOTPRequestSerializer, PhoneOTPVerifySerializer,
+    LoginSerializer
 )
 
 
-# ===================== Authentication Views =====================
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register_user(request):
-    """Register a new user"""
-    serializer = UserRegistrationSerializer(data=request.data)
+    """Register a new user - requires OTP verification first"""
+    print("new user registration")
+    print(request.data)
+    phone_number = request.data.get('phone_number')
+    otp_code = request.data.get('otp_code')
+
+    if not phone_number:
+        return Response({'error': 'Phone number is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Step 1: If no OTP code provided, send OTP
+    if not otp_code:
+        # Check if phone number is already registered
+        if User.objects.filter(phone_number=phone_number).exists():
+            return Response({'error': 'Phone number already registered'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Delete any existing OTP for this phone number
+        PhoneOTP.objects.filter(phone_number=phone_number).delete()
+
+        # Create new OTP
+        otp_obj = PhoneOTP.objects.create(phone_number=phone_number)
+
+        # Send SMS using SmsNative API
+        sms_result = send_sms_native(
+            mobile=phone_number,
+            message=f"Your Mazale verification code is: {otp_obj.otp_code}",
+            senderid="Mazale"
+        )
+
+        if sms_result["success"]:
+            return Response({
+                'message': 'OTP sent to your phone number. Please verify to complete registration.',
+                'phone_number': phone_number,
+                'requires_otp': True
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'error': f'Failed to send OTP: {sms_result["error"]}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # Step 2: OTP code provided, verify and register user
+    try:
+        # Verify OTP
+        otp_obj = PhoneOTP.objects.get(phone_number=phone_number, otp_code=otp_code)
+        
+        if otp_obj.is_expired():
+            otp_obj.delete()
+            return Response({'error': 'OTP has expired'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # OTP is valid, delete it
+        otp_obj.delete()
+
+        # Handle image uploads before registration
+        user_images = []
+        if request.FILES.getlist('user_images'):
+            try:
+                bucket = storage.bucket()
+
+                for index, photo in enumerate(request.FILES.getlist('user_images')):
+                    # Process image
+                    img = Image.open(photo)
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+
+                    # Add watermark
+                    draw = ImageDraw.Draw(img)
+                    width, height = img.size
+                    text = "Mazale Dating App"
+                    font_size = int(width * 0.03)
+                    try:
+                        font = ImageFont.truetype("arial.ttf", font_size)
+                    except:
+                        font = ImageFont.load_default()
+
+                    bbox = draw.textbbox((0, 0), text, font=font)
+                    textwidth, textheight = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                    x = width - textwidth - 20
+                    y = height - textheight - 20
+                    draw.text((x+1, y+1), text, font=font, fill=(0, 0, 0))
+                    draw.text((x, y), text, font=font, fill=(255, 255, 255))
+
+                    # Save to BytesIO
+                    temp_io = BytesIO()
+                    img.save(temp_io, format="JPEG", quality=90)
+                    temp_io.seek(0)
+
+                    # Upload to Firebase
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    firebase_path = f'users/{phone_number}/profile_{timestamp}_{index}.jpg'
+                    blob = bucket.blob(firebase_path)
+                    blob.upload_from_file(temp_io, content_type="image/jpeg")
+                    blob.make_public()
+                    user_images.append(blob.public_url)
+
+            except Exception as e:
+                print(f"Image upload error: {str(e)}")
+                return Response(
+                    {"error": f"Failed to upload images: {str(e)}"}, 
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+
+        # Prepare user data for serializer
+        # Create a clean dictionary without file objects
+        user_data = {}
+        for key, value in request.data.items():
+            if key != 'user_images':  # Skip the file objects
+                user_data[key] = value
+        
+        # Add the uploaded image URLs as a list
+        if user_images:
+            user_data['user_images'] = user_images
+        
+        print(f"User data being sent to serializer: {user_data}")
+
+        # Create user
+        serializer = UserLoginSerializer(data=user_data)
+        if serializer.is_valid():
+            user = serializer.save()
+
+            # Generate JWT tokens
+            refresh = RefreshToken()
+            refresh[jwt_settings.USER_ID_CLAIM] = getattr(user, jwt_settings.USER_ID_FIELD, 'id')
+            user.token = str(refresh.access_token)
+            user.refresh_token = str(refresh)
+            user.save()
+
+            return Response({
+                'message': 'User registered successfully',
+                'user': UserSerializer(user).data,
+                'token': user.token,
+                'refresh_token': user.refresh_token
+            }, status=status.HTTP_201_CREATED)
+        
+        print(f"Serializer errors: {serializer.errors}")
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    except PhoneOTP.DoesNotExist:
+        return Response({'error': 'Invalid OTP code'}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def request_phone_otp(request):
+    """Request OTP for phone number registration"""
+    serializer = PhoneOTPRequestSerializer(data=request.data)
     if serializer.is_valid():
-        user = serializer.save()
-        
-        # Generate tokens
-        refresh = RefreshToken()
-        refresh[jwt_settings.USER_ID_CLAIM] = getattr(user, jwt_settings.USER_ID_FIELD, 'id')
-        user.token = str(refresh.access_token)
-        user.refresh_token = str(refresh)
-        user.save()
-        
-        return Response({
-            'message': 'User registered successfully',
-            'user': UserSerializer(user).data,
-            'token': user.token,
-            'refresh_token': user.refresh_token
-        }, status=status.HTTP_201_CREATED)
-    
+        phone_number = serializer.validated_data['phone_number']
+
+        PhoneOTP.objects.filter(phone_number=phone_number).delete()
+
+        # Create new OTP
+        otp_obj = PhoneOTP.objects.create(phone_number=phone_number)
+        print(otp_obj.otp_code)
+
+        # Send SMS using SmsNative API
+        sms_result = send_sms_native(
+            mobile=phone_number,
+            message=f"Your Mazale verification code is: {otp_obj.otp_code}",
+            senderid="Mazale"
+        )
+
+        if sms_result["success"]:
+            return Response({
+                'message': 'OTP sent successfully',
+                'phone_number': phone_number
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'error': f'Failed to send SMS: {sms_result["error"]}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_phone_otp(request):
+    """Verify OTP for phone number"""
+    serializer = PhoneOTPVerifySerializer(data=request.data)
+    if serializer.is_valid():
+        phone_number = serializer.validated_data['phone_number']
+        otp_code = serializer.validated_data['otp_code']
+
+        try:
+            otp_obj = PhoneOTP.objects.get(phone_number=phone_number, otp_code=otp_code)
+            if otp_obj.is_expired():
+                return Response({'error': 'OTP has expired'}, status=status.HTTP_400_BAD_REQUEST)
+            otp_obj.verified=True
+            otp_obj.save()
+            # OTP is valid, delete it and allow registration
+            return Response({
+                'message': 'OTP verified successfully',
+                'phone_number': phone_number,
+                'verified': True
+            }, status=status.HTTP_200_OK)
+
+        except PhoneOTP.DoesNotExist:
+            return Response({'error': 'Invalid OTP'}, status=status.HTTP_400_BAD_REQUEST)
+
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -65,37 +359,38 @@ def register_user(request):
 @permission_classes([AllowAny])
 def login_user(request):
     """Login user with phone_number/email and password"""
-    serializer = UserLoginSerializer(data=request.data)
+    serializer = LoginSerializer(data=request.data)
     if serializer.is_valid():
         phone_number = serializer.validated_data.get('phone_number')
         email = serializer.validated_data.get('email')
         password = serializer.validated_data['password']
-        
-        # Find user
+
         user = None
         if phone_number:
             user = User.objects.filter(phone_number=phone_number).first()
         elif email:
             user = User.objects.filter(email=email).first()
-        
+
         if user and check_password(password, user.password):
-            # Generate new tokens
             refresh = RefreshToken()
             refresh[jwt_settings.USER_ID_CLAIM] = getattr(user, jwt_settings.USER_ID_FIELD, 'id')
             user.token = str(refresh.access_token)
             user.refresh_token = str(refresh)
             user.online = True
             user.save()
-            
+            print(user.token)
+            print(user.refresh_token)
+            print(user.first_name)
+            print(user.last_name)
             return Response({
-                'message': 'Login successful',
-                'user': UserSerializer(user).data,
                 'token': user.token,
-                'refresh_token': user.refresh_token
+                'id': user.id,
+                'first_name': user.first_name,
+                'last_name': user.last_name
             }, status=status.HTTP_200_OK)
-        
+
         return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
-    
+
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -109,25 +404,33 @@ def logout_user(request):
     return Response({'message': 'Logout successful'}, status=status.HTTP_200_OK)
 
 
-# ===================== User Views =====================
 
 class UserListView(APIView):
     permission_classes = [IsAuthenticated]
-    pagination_class = PageNumberPagination
+    pagination_class = CustomPageNumberPagination
 
     def get(self, request):
         """List all users with pagination"""
         print("fetching all users")
-        users = User.objects.all()
-        users = users.exclude(gender = request.user.gender)
+        users = User.objects.filter(gender__isnull=False).exclude(gender=request.user.gender)
         paginator = self.pagination_class()
         paginated_users = paginator.paginate_queryset(users, request)
         serializer = UserSerializer(paginated_users, many=True)
+
+        # Update user's current page after successful pagination
+        if hasattr(paginator, 'page') and paginator.page:
+            request.user.current_page = paginator.page.number
+            request.user.save(update_fields=['current_page'])
+
         return paginator.get_paginated_response(serializer.data)
 
 
 class UserProfileUpdateView(APIView):
     permission_classes = [IsAuthenticated]
+    def get(self, request):
+        """Get current user profile"""
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data)
     
     def put(self, request):
         """Update current user profile"""
@@ -137,7 +440,6 @@ class UserProfileUpdateView(APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# ===================== Profile Like Views =====================
 
 class ProfileLikeListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -155,18 +457,15 @@ class ProfileLikeListView(APIView):
         superlike = request.data.get('superlike', False)
         if liker.id == liked_user_id:
             return Response({'error': 'Cannot like your own profile'}, status=status.HTTP_400_BAD_REQUEST)
-        # Check if already liked
         if ProfileLike.objects.filter(liker=liker, liked_user_id=liked_user_id).exists():
             return Response({'error': 'Already liked'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Create like
         profile_like = ProfileLike.objects.create(
             liker=liker,
             liked_user_id=liked_user_id,
             superlike=superlike
         )
         
-        # Check for mutual match
         mutual_like = ProfileLike.objects.filter(
             liker_id=liked_user_id,
             liked_user_id=liker.id
@@ -216,7 +515,6 @@ class ProfileLikeReceivedView(APIView):
         return Response(serializer.data)
 
 
-# ===================== Match Views =====================
 
 class MatchListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -273,7 +571,6 @@ class NewMatchesView(APIView):
         return Response(serializer.data)
 
 
-# ===================== Conversation Views =====================
 
 class ConversationListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -294,7 +591,6 @@ class ConversationListView(APIView):
         if request.user.id not in participant_ids:
             participant_ids.append(request.user.id)
         
-        # Check if conversation exists between these participants
         conversations = Conversation.objects.filter(participants__id=request.user.id)
         for conv in conversations:
             conv_participant_ids = set(conv.participants.values_list('id', flat=True))
@@ -302,7 +598,6 @@ class ConversationListView(APIView):
                 serializer = ConversationSerializer(conv, context={'request': request})
                 return Response(serializer.data)
         
-        # Create new conversation
         conversation = Conversation.objects.create()
         conversation.participants.set(participant_ids)
         
@@ -335,7 +630,6 @@ class ConversationDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-# ===================== Message Views =====================
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -436,31 +730,109 @@ class MessageMarkConversationSeenView(APIView):
         ).update(seen=True)
         return Response({'message': f'{updated} messages marked as seen'})
 
+import os
+from io import BytesIO
+from datetime import datetime
+from PIL import Image, ImageDraw, ImageFont
+from django.core.files.base import ContentFile
+from rest_framework.response import Response
+from rest_framework import status
 
-# ===================== Moment Views =====================
 
 class MomentListView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
         """List moments"""
-        queryset = Moment.objects.all().order_by('-created_at')
-        user_id = request.query_params.get('user_id')
-        if user_id:
-            queryset = queryset.filter(owner_id=user_id)
-        
+        queryset = Moment.objects.all().order_by('-created_at')        
         serializer = MomentSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
     
     def post(self, request):
-        """Create a new moment"""
-        data = request.data.copy()
-        data['owner'] = request.user.id
+    
+        # 1. Extract files from the request
+        # Flutter sends these as multipart/form-data
+        images = request.FILES.getlist('images')
+        photo_urls = []
         
-        serializer = MomentSerializer(data=data, context={'request': request})
+        # 2. Upload to Firebase only if images exist
+        if images:
+            try:
+                bucket = storage.bucket()
+                
+                for index, photo in enumerate(images):
+                    # --- WATERMARK PROCESS START ---
+                    # 1. Open the image
+                    img = Image.open(photo)
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+                    
+                    # 2. Prepare Drawing context
+                    draw = ImageDraw.Draw(img)
+                    width, height = img.size
+                    
+                    # 3. Define text and dynamic font size (e.g., 3% of image width)
+                    text = "Mazale Dating App"
+                    font_size = int(width * 0.03)
+                    
+                    # Note: On many servers, you might need a full path to a .ttf file
+                    # If this fails, it will default to a tiny standard font
+                    try:
+                        font = ImageFont.truetype("arial.ttf", font_size)
+                    except:
+                        font = ImageFont.load_default()
+
+                    # 4. Position text (Bottom Right with padding)
+                    margin = 20
+                    # Using textbbox for Pillow 10.0.0+ compatibility
+                    bbox = draw.textbbox((0, 0), text, font=font)
+                    textwidth, textheight = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                    x = width - textwidth - margin
+                    y = height - textheight - margin
+                    
+                    # 5. Draw a subtle shadow/outline for readability and then the text
+                    draw.text((x+1, y+1), text, font=font, fill=(0, 0, 0)) # Shadow
+                    draw.text((x, y), text, font=font, fill=(255, 255, 255)) # White text
+                    
+                    # 6. Save modified image to a BytesIO object
+                    temp_io = BytesIO()
+                    img.save(temp_io, format="JPEG", quality=90)
+                    temp_io.seek(0)
+                    # --- WATERMARK PROCESS END ---
+
+                    # Generate a unique filename
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    file_extension = ".jpg" # Since we converted to RGB/JPEG
+                    firebase_path = f'moments/{request.user.id}/{timestamp}_{index}{file_extension}'
+                    
+                    # Perform Upload using the in-memory file
+                    blob = bucket.blob(firebase_path)
+                    blob.upload_from_file(temp_io, content_type="image/jpeg")
+                    
+                    blob.make_public()
+                    photo_urls.append(blob.public_url)
+                    
+            except Exception as e:
+                print(f"Firebase Storage Error: {str(e)}")
+                return Response({"error": "Failed to upload images"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # 3. Construct a CLEAN Python Dictionary
+        # We avoid using request.data.copy() directly to prevent QueryDict nesting issues
+        moment_data = {
+            "owner": request.user.id,
+            "tagline": request.data.get('tagline', ''),
+            "images": photo_urls  # This is now a clean Python list: ['url1', 'url2']
+        }
+
+        # 4. Serialize and Save
+        serializer = MomentSerializer(data=moment_data, context={'request': request})
+        
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
+        # 5. Debugging output if validation fails
+        print("Serializer Errors:", serializer.errors)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -532,13 +904,12 @@ class MomentFeedView(APIView):
     def get(self, request):
         """Get moment feed from matches and followed users"""
         user = request.user
-        # Get matched user IDs
+
         matches = Match.objects.filter(Q(user1=user) | Q(user2=user))
         matched_user_ids = []
         for match in matches:
             matched_user_ids.append(match.user2.id if match.user1 == user else match.user1.id)
         
-        # Get moments from matched users and self
         moments = Moment.objects.filter(
             Q(owner__id__in=matched_user_ids) | Q(owner=user)
         ).order_by('-created_at')[:50]
@@ -547,7 +918,6 @@ class MomentFeedView(APIView):
         return Response(serializer.data)
 
 
-# ===================== Comment Views =====================
 
 class CommentListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -606,7 +976,6 @@ class CommentDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-# ===================== Gift Views =====================
 
 class GiftListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -644,7 +1013,6 @@ class GiftCategoriesView(APIView):
         })
 
 
-# ===================== User Gift Views =====================
 
 class UserGiftListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -653,6 +1021,8 @@ class UserGiftListView(APIView):
         """List user's gifts"""
         user_gifts = UserGift.objects.filter(user=request.user)
         serializer = UserGiftSerializer(user_gifts, many=True)
+        print("User gifts fetched")
+        print(serializer.data)
         return Response(serializer.data)
 
 
@@ -679,7 +1049,6 @@ class UserGiftPurchaseView(APIView):
         except Gift.DoesNotExist:
             return Response({'error': 'Gift not found'}, status=status.HTTP_404_NOT_FOUND)
         
-        # Check if user already owns this gift
         user_gift, created = UserGift.objects.get_or_create(
             user=request.user,
             gift=gift,
@@ -687,7 +1056,7 @@ class UserGiftPurchaseView(APIView):
         )
         
         if not created:
-            user_gift.quantity += quantity
+            user_gift.quantity += int(quantity)
             user_gift.save()
         
         serializer = UserGiftSerializer(user_gift)
@@ -711,14 +1080,12 @@ class UserGiftSendView(APIView):
         if user_gift.quantity < quantity:
             return Response({'error': 'Insufficient quantity'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Decrease sender's quantity
         user_gift.quantity -= quantity
         if user_gift.quantity == 0:
             user_gift.delete()
         else:
             user_gift.save()
         
-        # Add to receiver
         receiver_gift, created = UserGift.objects.get_or_create(
             user_id=receiver_id,
             gift_id=gift_id,
@@ -732,7 +1099,6 @@ class UserGiftSendView(APIView):
         return Response({'message': 'Gift sent successfully'})
 
 
-# ===================== Transaction Views =====================
 
 class TransactionListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -783,7 +1149,6 @@ class TransactionStatsView(APIView):
         })
 
 
-# ===================== Withdrawal Views =====================
 
 class WithdrawalListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -836,7 +1201,6 @@ class WithdrawalApprovedView(APIView):
         return Response(serializer.data)
 
 
-# ===================== Notification Views =====================
 
 class NotificationListView(APIView):
     permission_classes = [IsAuthenticated]
@@ -899,39 +1263,39 @@ class NotificationUnreadCountView(APIView):
         return Response({'unread_count': count})
     
 
-# ===================== NEW: ML-Enhanced User Discovery =====================
 
 class SmartUserListView(APIView):
     """ML-powered user recommendations"""
     permission_classes = [IsAuthenticated]
-    pagination_class = PageNumberPagination
+    pagination_class = CustomPageNumberPagination
 
     def get(self, request):
         """Get personalized user recommendations"""
-        # Initialize ML engine
-        engine = DatingRecommendationEngine(request.user)
-        
-        # Get query parameters
-        limit = int(request.query_params.get('limit', 20))
-        refresh = request.query_params.get('refresh', 'false').lower() == 'true'
-        
-        # Update preferences periodically
-        if not request.user.last_recommendation_update or \
-           (timezone.now() - request.user.last_recommendation_update).days >= 1 or refresh:
-            engine.update_user_preferences()
-        
-        # Get recommended users
-        recommended_users = engine.get_recommended_users(limit=limit)
-        
-        # Paginate
+        # engine = DatingRecommendationEngine(request.user)
+
+        limit = int(request.query_params.get('limit', 10))
+        # refresh = request.query_params.get('refresh', 'false').lower() == 'true'
+
+        # now = timezone.now()
+        # if not request.user.last_recommendation_update or \
+        #    (now - request.user.last_recommendation_update).days >= 1 or refresh:
+        #     engine.update_user_preferences()
+
+        # recommended_users = engine.get_recommended_users(limit=limit)
+        recommended_users = User.objects.filter(gender__isnull=False).exclude(gender=request.user.gender)[:limit]
+
         paginator = self.pagination_class()
         paginated_users = paginator.paginate_queryset(recommended_users, request)
         serializer = UserSerializer(paginated_users, many=True)
-        
+
+        # Update user's current page after successful pagination
+        if hasattr(paginator, 'page') and paginator.page:
+            request.user.current_page = paginator.page.number
+            request.user.save(update_fields=['current_page'])
+
         return paginator.get_paginated_response(serializer.data)
 
 
-# ===================== NEW: Profile View Tracking =====================
 
 class ProfileViewTrackingView(APIView):
     """Track detailed profile viewing behavior"""
@@ -948,7 +1312,6 @@ class ProfileViewTrackingView(APIView):
         if not viewed_user_id:
             return Response({'error': 'viewed_user_id required'}, status=400)
         
-        # Create profile view
         profile_view = ProfileView.objects.create(
             viewer=request.user,
             viewed_user_id=viewed_user_id,
@@ -958,7 +1321,6 @@ class ProfileViewTrackingView(APIView):
             clicked_social_links=clicked_social_links
         )
         
-        # Log interaction
         engagement_score = self._calculate_view_engagement(
             view_duration, scrolled_to_bottom, viewed_images_count, clicked_social_links
         )
@@ -976,7 +1338,6 @@ class ProfileViewTrackingView(APIView):
         """Calculate engagement score from viewing behavior"""
         score = 0
         
-        # Duration scoring (max 40 points)
         if duration >= 60:
             score += 40
         elif duration >= 30:
@@ -986,7 +1347,6 @@ class ProfileViewTrackingView(APIView):
         else:
             score += 10
         
-        # Interaction scoring
         if scrolled:
             score += 20
         if images_viewed >= 3:
@@ -999,7 +1359,6 @@ class ProfileViewTrackingView(APIView):
         return min(score, 100)
 
 
-# ===================== MODIFIED: Enhanced Profile Like with ML =====================
 
 class EnhancedProfileLikeView(APIView):
     """Enhanced like tracking with ML insights"""
@@ -1014,18 +1373,15 @@ class EnhancedProfileLikeView(APIView):
         if liker.id == liked_user_id:
             return Response({'error': 'Cannot like your own profile'}, status=400)
         
-        # Check if already liked
         if ProfileLike.objects.filter(liker=liker, liked_user_id=liked_user_id).exists():
             return Response({'error': 'Already liked'}, status=400)
         
-        # Create like
         profile_like = ProfileLike.objects.create(
             liker=liker,
             liked_user_id=liked_user_id,
             superlike=superlike
         )
         
-        # Log interaction
         UserInteraction.objects.create(
             user=liker,
             interaction_type='superlike' if superlike else 'like',
@@ -1033,7 +1389,6 @@ class EnhancedProfileLikeView(APIView):
             engagement_score=100 if superlike else 75
         )
         
-        # Check for mutual match
         mutual_like = ProfileLike.objects.filter(
             liker_id=liked_user_id,
             liked_user_id=liker.id
@@ -1049,7 +1404,6 @@ class EnhancedProfileLikeView(APIView):
             response_data['match'] = MatchSerializer(match).data
             response_data['is_match'] = True
             
-            # Boost both users' recommendation scores
             liked_user = User.objects.get(id=liked_user_id)
             liker.recommendation_boost = min(liker.recommendation_boost * 1.1, 2.0)
             liked_user.recommendation_boost = min(liked_user.recommendation_boost * 1.1, 2.0)
@@ -1058,11 +1412,10 @@ class EnhancedProfileLikeView(APIView):
         else:
             response_data['is_match'] = False
         
-        # Update user preferences after every 5 likes
         like_count = ProfileLike.objects.filter(liker=liker).count()
-        if like_count % 5 == 0:
-            engine = DatingRecommendationEngine(liker)
-            engine.update_user_preferences()
+        # if like_count % 5 == 0:
+        #     engine = DatingRecommendationEngine(liker)
+        #     engine.update_user_preferences()
         
         return Response(response_data, status=201)
 
@@ -1078,18 +1431,16 @@ class ProfilePassView(APIView):
         if not passed_user_id:
             return Response({'error': 'passed_user_id required'}, status=400)
         
-        # Log interaction
         UserInteraction.objects.create(
             user=request.user,
             interaction_type='pass',
             target_user_id=passed_user_id,
-            engagement_score=0  # Negative signal
+            engagement_score=0
         )
         
         return Response({'message': 'Pass recorded'})
 
 
-# ===================== NEW: User Analytics Dashboard =====================
 
 class UserAnalyticsView(APIView):
     """Get user's engagement analytics"""
@@ -1098,27 +1449,25 @@ class UserAnalyticsView(APIView):
     def get(self, request):
         """Get comprehensive user analytics"""
         user = request.user
-        engine = DatingRecommendationEngine(user)
-        
-        # Profile views analytics
+        # engine = DatingRecommendationEngine(user)
+
         profile_views_made = ProfileView.objects.filter(viewer=user)
         profile_views_received = ProfileView.objects.filter(viewed_user=user)
-        
-        # Interaction analytics
+
         interactions = UserInteraction.objects.filter(user=user)
-        
+
         analytics = {
             'engagement_score': user.engagement_score,
             'activity_level': user.activity_level,
             'recommendation_boost': user.recommendation_boost,
-            'profile_completeness': engine._calculate_profile_completeness(user) * 100,
-            
+            'profile_completeness': 50,  # engine._calculate_profile_completeness(user) * 100,
+
             'profile_views': {
                 'made': profile_views_made.count(),
                 'received': profile_views_received.count(),
                 'avg_duration': profile_views_made.aggregate(Avg('view_duration'))['view_duration__avg'] or 0,
             },
-            
+
             'interactions': {
                 'total': interactions.count(),
                 'likes': interactions.filter(interaction_type='like').count(),
@@ -1126,25 +1475,24 @@ class UserAnalyticsView(APIView):
                 'messages': interactions.filter(interaction_type='message_sent').count(),
                 'avg_engagement': interactions.aggregate(Avg('engagement_score'))['engagement_score__avg'] or 0,
             },
-            
+
             'matches': {
                 'total': Match.objects.filter(Q(user1=user) | Q(user2=user)).count(),
                 'new': Match.objects.filter(
                     Q(user1=user, seen_by_user1=False) | Q(user2=user, seen_by_user2=False)
                 ).count(),
             },
-            
+
             'preferences': {
-                'swipe_rate': engine.preference_profile.swipe_rate,
-                'avg_session_duration': engine.preference_profile.avg_session_duration,
-                'distance_importance': engine.preference_profile.distance_importance,
+                'swipe_rate': 0,  # engine.preference_profile.swipe_rate,
+                'avg_session_duration': 0,  # engine.preference_profile.avg_session_duration,
+                'distance_importance': 0,  # engine.preference_profile.distance_importance,
             }
         }
-        
+
         return Response(analytics)
 
 
-# ===================== MODIFIED: Enhanced Message Sending =====================
 
 class EnhancedMessageListView(APIView):
     """Enhanced message tracking with ML"""
@@ -1159,15 +1507,13 @@ class EnhancedMessageListView(APIView):
         if serializer.is_valid():
             message = serializer.save()
             
-            # Log interaction
             UserInteraction.objects.create(
                 user=request.user,
                 interaction_type='message_sent',
                 target_user=message.receiver,
-                engagement_score=50  # Base score for messaging
+                engagement_score=50
             )
             
-            # Update conversation timestamp
             if message.conversation:
                 message.conversation.updated_at = timezone.now()
                 message.conversation.save()
@@ -1176,7 +1522,6 @@ class EnhancedMessageListView(APIView):
         return Response(serializer.errors, status=400)
 
 
-# ===================== NEW: Boost Engagement Features =====================
 
 class UserBoostView(APIView):
     """Temporarily boost user's visibility"""
@@ -1191,8 +1536,6 @@ class UserBoostView(APIView):
         user.recommendation_boost = boost_factor
         user.save()
         
-        # Schedule boost removal (you'd typically use Celery for this)
-        # For now, just return success
         
         return Response({
             'message': f'Boost applied for {duration_hours} hours',
@@ -1210,32 +1553,28 @@ class SimilarUsersView(APIView):
             target_user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=404)
-        
-        engine = DatingRecommendationEngine(request.user)
-        
-        # Get all potential candidates
+
+        # engine = DatingRecommendationEngine(request.user)
+
         candidates = User.objects.exclude(
             id__in=[request.user.id, target_user.id]
-        ).exclude(gender=request.user.gender)[:50]
-        
-        # Score by similarity to target user
-        similar_users = []
-        for candidate in candidates:
-            similarity = engine._calculate_profile_similarity(candidate, target_user)
-            if similarity > 0.3:  # Only include reasonably similar users
-                similar_users.append((similarity, candidate))
-        
-        # Sort by similarity
-        similar_users.sort(key=lambda x: x[0], reverse=True)
-        
-        # Return top 10
-        results = [user for score, user in similar_users[:10]]
+        ).filter(gender__isnull=False).exclude(gender=request.user.gender)[:50]
+
+        # similar_users = []
+        # for candidate in candidates:
+        #     similarity = engine._calculate_profile_similarity(candidate, target_user)
+        #     if similarity > 0.3:
+        #         similar_users.append((similarity, candidate))
+
+        # similar_users.sort(key=lambda x: x[0], reverse=True)
+
+        # results = [user for score, user in similar_users[:10]]
+        results = candidates[:10]
         serializer = UserSerializer(results, many=True)
-        
+
         return Response(serializer.data)
 
 
-# ===================== NEW: Engagement Optimization =====================
 
 class OptimizeProfileView(APIView):
     """Get suggestions to optimize profile for better matches"""
@@ -1244,12 +1583,11 @@ class OptimizeProfileView(APIView):
     def get(self, request):
         """Analyze profile and provide optimization suggestions"""
         user = request.user
-        engine = DatingRecommendationEngine(user)
-        
+        # engine = DatingRecommendationEngine(user)
+
         suggestions = []
-        
-        # Check profile completeness
-        completeness = engine._calculate_profile_completeness(user)
+
+        completeness = 0.5  # engine._calculate_profile_completeness(user)
         if completeness < 0.7:
             suggestions.append({
                 'category': 'profile_completeness',
@@ -1258,47 +1596,42 @@ class OptimizeProfileView(APIView):
                 ),
                 'priority': 'high'
             })
-        
-        # Check photo count
+
         if not user.user_images or len(user.user_images) < 4:
             suggestions.append({
                 'category': 'photos',
                 'message': 'Add more photos! Profiles with 4+ photos get 3x more matches.',
                 'priority': 'high'
             })
-        
-        # Check bio length
+
         if not user.about or len(user.about) < 100:
             suggestions.append({
                 'category': 'bio',
                 'message': 'Write a more detailed bio. Profiles with longer bios get 60% more engagement.',
                 'priority': 'medium'
             })
-        
-        # Check interests
+
         if not user.user_interests or len(user.user_interests) < 3:
             suggestions.append({
                 'category': 'interests',
                 'message': 'Add at least 3 interests to help us find better matches for you.',
                 'priority': 'medium'
             })
-        
-        # Check activity level
+
         if user.activity_level == 'low':
             suggestions.append({
                 'category': 'activity',
                 'message': 'Be more active! Log in daily and engage with profiles to improve your visibility.',
                 'priority': 'medium'
             })
-        
-        # Check swipe rate
-        if engine.preference_profile.swipe_rate < 0.1:
-            suggestions.append({
-                'category': 'engagement',
-                'message': 'You\'re very selective! Consider liking more profiles to increase your match potential.',
-                'priority': 'low'
-            })
-        
+
+        # if engine.preference_profile.swipe_rate < 0.1:
+        #     suggestions.append({
+        #         'category': 'engagement',
+        #         'message': 'You\'re very selective! Consider liking more profiles to increase your match potential.',
+        #         'priority': 'low'
+        #     })
+
         return Response({
             'profile_score': int(completeness * 100),
             'engagement_score': int(user.engagement_score),
@@ -1325,12 +1658,10 @@ class SocketHandshakeView(APIView):
             
             token = auth_header[1]
             
-            # 2. Prepare the payload for Node.js
-            # Ensure keys match exactly what your Node.js code expects
             user_data = {
                 "id": user.id,
                 "first_name": user.first_name or user.username,
-                "profile_pic": getattr(user, 'profile_pic_url', '') # Adapt to your model
+                "profile_pic": getattr(user, 'profile_pic_url', '')
             }
             redis_key = f"session:{token}"
             redis_client.setex(
@@ -1355,47 +1686,43 @@ class SocketHandshakeView(APIView):
 class SMSDeliveryEngine(APIView):
     def post(self, request):
         """
-        Sends an SMS via SmsNative HTTP API and returns a proper DRF Response.
+        Sends an SMS via SmsNative HTTP API following their documentation.
+        Supports all parameters: mobile, message, senderid, schedule, unicode, group_id
         """
         mobile = request.data.get("mobile")
         message = request.data.get("message")
-        
-        # Validation
+        senderid = request.data.get("senderid", "Mazale")
+        schedule = request.data.get("schedule")  # Format: yyyy:mm:dd:hh:mm:ss
+        unicode = request.data.get("unicode")    # 1 or 2
+        group_id = request.data.get("group_id")  # Comma-separated group IDs
+
         if not mobile or not message:
             return Response(
-                {"error": "Mobile and message fields are required."}, 
+                {"error": "Mobile and message fields are required."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        url = "http://www.smsnative.com/sendsms.php"
-        params = {
-            "user": "Mazale",
-            "password": "jklasdzc.@Ll6442369123..",
-            "mobile": mobile,
-            "senderid": "Mazale",
-            "message": message,
-        }
-        
-        try:
-            response = requests.get(url, params=params)
-            
-            # Success logic
-            if "1111" in response.text:
-                return Response({
-                    "success": True,
-                    "message": "SMS Sent Successfully",
-                    "details": response.text
-                }, status=status.HTTP_200_OK)
-            
-            # API Error logic (e.g., Insufficient credits, invalid login)
-            return Response({
-                "success": False,
-                "error": "SMS Provider Error",
-                "details": response.text
-            }, status=status.HTTP_400_BAD_REQUEST)
+        # Send SMS using the unified SmsNative function
+        sms_result = send_sms_native(
+            mobile=mobile,
+            message=message,
+            senderid=senderid,
+            schedule=schedule,
+            unicode=unicode,
+            group_id=group_id
+        )
 
-        except Exception as e:
+        if sms_result["success"]:
+            return Response({
+                "success": True,
+                "message": sms_result["message"],
+                "response_code": sms_result.get("response_code"),
+                "details": sms_result["details"]
+            }, status=status.HTTP_200_OK)
+        else:
             return Response({
                 "success": False,
-                "error": str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                "error": sms_result["error"],
+                "response_code": sms_result.get("response_code"),
+                "details": sms_result.get("details")
+            }, status=status.HTTP_400_BAD_REQUEST)

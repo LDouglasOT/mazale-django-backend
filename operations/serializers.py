@@ -1,9 +1,9 @@
 from rest_framework import serializers
 from django.contrib.auth.hashers import make_password
 from .models import (
-    User, ProfileLike, Match, Conversation, Message, 
-    Moment, MomentLike, Comment, Gift, UserGift, 
-    Transaction, Withdrawal, Notification,ProfileView, UserInteraction, UserPreferenceProfile
+    User, ProfileLike, Match, Conversation, Message,
+    Moment, MomentLike, Comment, Gift, UserGift,
+    Transaction, Withdrawal, Notification,ProfileView, UserInteraction, UserPreferenceProfile, PhoneOTP
 )
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -15,7 +15,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         fields = [
             'phone_number', 'email', 'password', 'confirm_password',
             'first_name', 'last_name', 'gender', 'day', 'month', 'year',
-            'engagement_score', 'recommendation_boost', 'activity_level',
+            'user_images', 'engagement_score', 'recommendation_boost', 'activity_level',
             'compatibility_score', 'profile_completeness',
         ]
         read_only_fields = [
@@ -35,16 +35,57 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         return User.objects.create(**validated_data)
 
 
-class UserLoginSerializer(serializers.Serializer):
-    phone_number = serializers.CharField(required=False)
-    email = serializers.EmailField(required=False)
+class UserLoginSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = [
+            'phone_number', 'email', 'password', 'first_name', 'last_name',
+            'day', 'month', 'year', 'latitude', 'longitude', 'gender',
+            'about', 'hopes', 'religion', 'user_images', 'user_interests'
+        ]
+        extra_kwargs = {
+            'password': {'write_only': True}
+        }
+
+    def create(self, validated_data):
+        """Create and return a new user instance"""
+        # Extract password to hash it separately
+        password = validated_data.pop('password', None)
+
+        # Create user instance
+        user = User(**validated_data)
+
+        # Set the password (this will hash it)
+        if password:
+            user.set_password(password)
+
+        user.save()
+        return user
+
+    def validate_phone_number(self, value):
+        """Ensure phone number is unique"""
+        if User.objects.filter(phone_number=value).exists():
+            raise serializers.ValidationError("Phone number already registered")
+        return value
+
+
+class LoginSerializer(serializers.Serializer):
+    """Serializer for user login - only validates credentials exist"""
+    phone_number = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.CharField(required=False, allow_blank=True)
     password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        if not data.get('phone_number') and not data.get('email'):
-            raise serializers.ValidationError(
-                "Either phone_number or email is required"
-            )
+        phone_number = data.get('phone_number')
+        email = data.get('email')
+        password = data.get('password')
+
+        if not phone_number and not email:
+            raise serializers.ValidationError("Either phone_number or email is required")
+
+        if not password:
+            raise serializers.ValidationError("Password is required")
+
         return data
 
 
@@ -269,3 +310,24 @@ class UserPreferenceProfileSerializer(serializers.ModelSerializer):
             'interest_weights', 'personality_vector', 'updated_at'
         ]
         read_only_fields = ['id', 'updated_at']
+
+
+class PhoneOTPSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PhoneOTP
+        fields = ['phone_number', 'otp_code', 'created_at', 'expires_at']
+        read_only_fields = ['otp_code', 'created_at', 'expires_at']
+
+
+class PhoneOTPRequestSerializer(serializers.Serializer):
+    phone_number = serializers.CharField(max_length=20)
+
+    def validate_phone_number(self, value):
+        if User.objects.filter(phone_number=value).exists():
+            raise serializers.ValidationError("Phone number already registered")
+        return value
+
+
+class PhoneOTPVerifySerializer(serializers.Serializer):
+    phone_number = serializers.CharField(max_length=20)
+    otp_code = serializers.CharField(max_length=6)

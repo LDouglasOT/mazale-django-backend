@@ -2,9 +2,11 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .notifications import TestNotificationAllView, TestNotificationSpecificView
+from .Auth import google_auth_receiver,upload_photos
+from .location import nearby_users, update_location
 from .views import (
     # Authentication
-    SMSDeliveryEngine, register_user, login_user, logout_user,
+    SMSDeliveryEngine, register_user, login_user, logout_user, request_phone_otp, verify_phone_otp,
     
     # Users
     UserListView, UserProfileUpdateView,verify_token,
@@ -60,9 +62,13 @@ from .views import (
 urlpatterns = [
     # ===================== Authentication =====================
     path('auth/register/', register_user, name='register'),
+    path('auth/request-otp/', request_phone_otp, name='request-otp'),
+    path('auth/verify-otp/', verify_phone_otp, name='verify-otp'),
     path('auth/login/', login_user, name='login'),
+    path('upload-photos/', upload_photos, name='upload-photos'),
+    path('auth/google/', google_auth_receiver, name='google-auth'),
     path('auth/logout/', logout_user, name='logout'),
-    path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('profile/', UserProfileUpdateView.as_view(), name='profile'),
     
     # ===================== Users =====================
     path('users/', UserListView.as_view(), name='user-list'),
@@ -145,6 +151,8 @@ urlpatterns = [
     path('chat/handshake/', SocketHandshakeView.as_view(), name='socket-handshake'),
     # ===================== SMS DELIVERY ENGINE =====================
     path('sms/', SMSDeliveryEngine.as_view(), name='sms-engine'),
+    path('nearme/', nearby_users, name='nearby_users'),
+    path('update-location/', update_location, name='update_location'),
 
 
 

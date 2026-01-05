@@ -1,6 +1,8 @@
 from django.db import models
 from django.utils import timezone
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager,PermissionsMixin
+import random
+import string
 
 
 class UserManager(BaseUserManager):
@@ -98,6 +100,9 @@ class User(AbstractBaseUser,PermissionsMixin):
         ('high', 'High'),
         ('very_high', 'Very High')
     ])
+
+    # Pagination tracking
+    current_page = models.PositiveIntegerField(default=1, help_text="Current page in users list pagination")
 
 
 
@@ -482,3 +487,34 @@ class UserPreferenceProfile(models.Model):
     class Meta:
         verbose_name = "User Preference Profile"
         verbose_name_plural = "User Preference Profiles"
+
+
+class PhoneOTP(models.Model):
+    """OTP for phone number verification during registration"""
+    phone_number = models.CharField(max_length=20, unique=True)
+    otp_code = models.CharField(max_length=6)
+    verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = "Phone OTP"
+        verbose_name_plural = "Phone OTPs"
+
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+
+    @staticmethod
+    def generate_otp():
+        """Generate a 5-digit OTP"""
+        return ''.join(random.choices(string.digits, k=5))
+
+    def save(self, *args, **kwargs):
+        if not self.otp_code:
+            self.otp_code = self.generate_otp()
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timezone.timedelta(minutes=5)  # 5 minutes expiry
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"OTP for {self.phone_number}: {self.otp_code}"

@@ -12,11 +12,25 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 import os
+import firebase_admin
+from firebase_admin import credentials
+import os
+
+# Path to the service account key you just downloaded
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+service_account_path = os.path.join(BASE_DIR, 'Service-Account.json')
 
+if not firebase_admin._apps:
+    cred = credentials.Certificate(service_account_path)
+    firebase_admin.initialize_app(cred, {
+        # This one line enables Storage alongside Auth
+        'storageBucket': 'twinbrook-12f84.appspot.com'
+    })
+
+    
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 

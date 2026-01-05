@@ -1,4 +1,3 @@
-# Create new file: dating_app/ml_engine.py
 
 import numpy as np
 from datetime import datetime, timedelta
@@ -34,7 +33,6 @@ class DatingRecommendationEngine:
             'activity_match': self._activity_level_match(candidate_user)
         }
         
-        # Weighted average
         weights = {
             'demographic': 0.15,
             'behavioral': 0.20,
@@ -47,7 +45,6 @@ class DatingRecommendationEngine:
         
         final_score = sum(scores[key] * weights[key] for key in scores)
         
-        # Apply boost factors
         final_score *= candidate_user.recommendation_boost
         
         return min(final_score, 100)
@@ -56,10 +53,9 @@ class DatingRecommendationEngine:
         """Calculate demographic compatibility (age, location, gender preference)"""
         score = 100
         
-        # Age compatibility
         if self.user.year and candidate.year:
-            user_age = datetime.now().year - int(self.user.year)
-            candidate_age = datetime.now().year - int(candidate.year)
+            user_age = timezone.now().year - int(self.user.year)
+            candidate_age = timezone.now().year - int(candidate.year)
             
             age_diff = abs(user_age - candidate_age)
             min_pref = self.preference_profile.age_preference_min
@@ -74,7 +70,6 @@ class DatingRecommendationEngine:
             else:
                 score *= 0.7
         
-        # Location proximity
         if self.user.latitude and self.user.longitude and candidate.latitude and candidate.longitude:
             distance = self._calculate_distance(
                 float(self.user.latitude), float(self.user.longitude),
@@ -82,7 +77,7 @@ class DatingRecommendationEngine:
             )
             
             distance_importance = self.preference_profile.distance_importance
-            if distance <= 10:  # Within 10km
+            if distance <= 10:
                 score *= 1.0
             elif distance <= 50:
                 score *= (1 - (distance_importance * 0.2))
@@ -99,30 +94,26 @@ class DatingRecommendationEngine:
         
         score = 100
         
-        # Analyze past interactions with similar profiles
         similar_interactions = UserInteraction.objects.filter(
             user=self.user,
             interaction_type__in=['like', 'superlike', 'message_sent']
         ).select_related('target_user')
         
         if similar_interactions.exists():
-            # Find patterns in liked profiles
             liked_profiles = [i.target_user for i in similar_interactions if i.target_user]
             
-            # Compare candidate attributes with liked profiles
             similarity_scores = []
-            for liked_user in liked_profiles[:20]:  # Last 20 liked profiles
+            for liked_user in liked_profiles[:20]:
                 similarity = self._calculate_profile_similarity(candidate, liked_user)
                 similarity_scores.append(similarity)
             
             if similarity_scores:
                 avg_similarity = np.mean(similarity_scores)
-                score *= (0.5 + avg_similarity * 0.5)  # Scale to 50-100%
+                score *= (0.5 + avg_similarity * 0.5)
         
-        # Check viewing behavior
         profile_views = ProfileView.objects.filter(
             viewer=self.user,
-            view_duration__gte=10  # At least 10 seconds
+            view_duration__gte=10
         ).select_related('viewed_user')
         
         if profile_views.exists():
@@ -131,7 +122,6 @@ class DatingRecommendationEngine:
             )
             engagement_rate = engaged_views.count() / profile_views.count()
             
-            # Boost score if candidate matches engaged profile patterns
             engaged_profiles = [pv.viewed_user for pv in engaged_views]
             if engaged_profiles:
                 candidate_similarity = np.mean([
@@ -144,21 +134,18 @@ class DatingRecommendationEngine:
     
     def _interest_compatibility(self, candidate):
         """Calculate interest overlap and compatibility"""
-        score = 50  # Base score
+        score = 50
         
         user_interests = set(self.user.user_interests or [])
         candidate_interests = set(candidate.user_interests or [])
         
         if user_interests and candidate_interests:
-            # Jaccard similarity
             intersection = len(user_interests & candidate_interests)
             union = len(user_interests | candidate_interests)
             jaccard = intersection / union if union > 0 else 0
             
-            # Boost score based on overlap
             score = 50 + (jaccard * 50)
             
-            # Extra boost for rare interest matches
             if intersection > 0:
                 score *= 1.1
         
@@ -168,15 +155,13 @@ class DatingRecommendationEngine:
         """Predict likelihood of mutual engagement"""
         from .models import UserInteraction
         
-        score = 70  # Optimistic base score
+        score = 70
         
-        # Candidate's response rate
         candidate_messages = UserInteraction.objects.filter(
             target_user=candidate,
             interaction_type='message_sent'
         ).count()
         
-        # Check if candidate is active
         if candidate.online:
             score *= 1.2
         elif candidate.last_login:
@@ -188,11 +173,9 @@ class DatingRecommendationEngine:
             else:
                 score *= 0.8
         
-        # Activity level matching
         if candidate.activity_level in ['high', 'very_high']:
             score *= 1.15
         
-        # Profile completeness (more complete = higher engagement potential)
         completeness = self._calculate_profile_completeness(candidate)
         score *= (0.7 + completeness * 0.3)
         
@@ -202,9 +185,8 @@ class DatingRecommendationEngine:
         """Calculate likelihood of reciprocal interest"""
         from .models import ProfileView, ProfileLike
         
-        score = 50  # Neutral base
+        score = 50
         
-        # Has candidate viewed our profile?
         candidate_viewed_us = ProfileView.objects.filter(
             viewer=candidate,
             viewed_user=self.user
@@ -213,7 +195,6 @@ class DatingRecommendationEngine:
         if candidate_viewed_us:
             score *= 1.5
             
-            # Check view quality
             recent_views = ProfileView.objects.filter(
                 viewer=candidate,
                 viewed_user=self.user,
@@ -225,7 +206,6 @@ class DatingRecommendationEngine:
             if recent_views and recent_views.scrolled_to_bottom:
                 score *= 1.2
         
-        # Check if they like similar profiles
         our_likes = ProfileLike.objects.filter(liker=self.user).values_list('liked_user_id', flat=True)
         their_likes = ProfileLike.objects.filter(liker=candidate).values_list('liked_user_id', flat=True)
         
@@ -246,7 +226,7 @@ class DatingRecommendationEngine:
         ).count()
         
         if views_count == 0:
-            return 100  # New profile, maximum freshness
+            return 100
         elif views_count == 1:
             return 80
         elif views_count <= 3:
@@ -254,7 +234,7 @@ class DatingRecommendationEngine:
         elif views_count <= 5:
             return 40
         else:
-            return 20  # Seen too many times
+            return 20
     
     def _activity_level_match(self, candidate):
         """Match users with similar activity patterns"""
@@ -279,7 +259,6 @@ class DatingRecommendationEngine:
         similarity_score = 0
         factors = 0
         
-        # Interest similarity
         if profile1.user_interests and profile2.user_interests:
             interests1 = set(profile1.user_interests)
             interests2 = set(profile2.user_interests)
@@ -288,14 +267,12 @@ class DatingRecommendationEngine:
                 similarity_score += jaccard
                 factors += 1
         
-        # Age similarity
         if profile1.year and profile2.year:
             age_diff = abs(int(profile1.year) - int(profile2.year))
             age_similarity = max(0, 1 - (age_diff / 20))
             similarity_score += age_similarity
             factors += 1
         
-        # About text similarity (simple keyword matching)
         if profile1.about and profile2.about:
             words1 = set(profile1.about.lower().split())
             words2 = set(profile2.about.lower().split())
@@ -308,7 +285,7 @@ class DatingRecommendationEngine:
     
     def _calculate_distance(self, lat1, lon1, lat2, lon2):
         """Calculate distance between two coordinates in km"""
-        R = 6371  # Earth's radius in km
+        R = 6371
         
         lat1_rad = math.radians(lat1)
         lat2_rad = math.radians(lat2)
@@ -343,35 +320,29 @@ class DatingRecommendationEngine:
         Get recommended users sorted by compatibility score
         """
         from .models import User, ProfileLike, Match
+
+        # Only recommend users with gender set and opposite gender
+        candidates = User.objects.exclude(id=self.user.id).filter(gender__isnull=False).exclude(gender=self.user.gender)
         
-        # Base queryset - opposite gender, not already matched/liked
-        candidates = User.objects.exclude(id=self.user.id).exclude(gender=self.user.gender)
-        
-        # Exclude already liked
         already_liked = ProfileLike.objects.filter(liker=self.user).values_list('liked_user_id', flat=True)
         candidates = candidates.exclude(id__in=already_liked)
         
-        # Exclude existing matches
         matches = Match.objects.filter(Q(user1=self.user) | Q(user2=self.user))
         matched_ids = []
         for match in matches:
             matched_ids.append(match.user2.id if match.user1 == self.user else match.user1.id)
         candidates = candidates.exclude(id__in=matched_ids)
         
-        # Exclude specific IDs if provided
         if exclude_ids:
             candidates = candidates.exclude(id__in=exclude_ids)
         
-        # Calculate scores for all candidates
         scored_candidates = []
-        for candidate in candidates[:100]:  # Limit initial pool for performance
+        for candidate in candidates[:100]:
             score = self.calculate_compatibility_score(candidate)
             scored_candidates.append((score, candidate))
         
-        # Sort by score (descending)
         scored_candidates.sort(key=lambda x: x[0], reverse=True)
         
-        # Return top N
         return [candidate for score, candidate in scored_candidates[:limit]]
     
     def update_user_preferences(self):
@@ -381,14 +352,12 @@ class DatingRecommendationEngine:
         """
         from .models import UserInteraction, ProfileView, ProfileLike
         
-        # Update swipe rate
         total_views = ProfileView.objects.filter(viewer=self.user).count()
         total_likes = ProfileLike.objects.filter(liker=self.user).count()
         
         if total_views > 0:
             self.preference_profile.swipe_rate = total_likes / total_views
         
-        # Update activity level
         recent_interactions = UserInteraction.objects.filter(
             user=self.user,
             created_at__gte=timezone.now() - timedelta(days=7)
@@ -403,7 +372,6 @@ class DatingRecommendationEngine:
         else:
             self.user.activity_level = 'low'
         
-        # Calculate engagement score
         engagement_factors = {
             'messages_sent': UserInteraction.objects.filter(
                 user=self.user, interaction_type='message_sent'
@@ -430,7 +398,6 @@ class DatingRecommendationEngine:
         """Calculate how consistently user is active (0-1 scale)"""
         from .models import UserInteraction
         
-        # Check activity over last 7 days
         daily_activity = []
         for i in range(7):
             date = timezone.now() - timedelta(days=i)
@@ -443,12 +410,11 @@ class DatingRecommendationEngine:
                 created_at__lte=day_end
             ).count()
             
-            daily_activity.append(min(count, 10))  # Cap at 10
+            daily_activity.append(min(count, 10))
         
         if not daily_activity:
             return 0
         
-        # Calculate coefficient of variation (lower = more consistent)
         mean = np.mean(daily_activity)
         if mean == 0:
             return 0
@@ -456,7 +422,6 @@ class DatingRecommendationEngine:
         std = np.std(daily_activity)
         cv = std / mean
         
-        # Convert to 0-1 scale (lower CV = higher consistency)
         consistency = max(0, 1 - (cv / 2))
         
         return consistency
