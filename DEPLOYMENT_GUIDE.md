@@ -44,6 +44,10 @@ Required environment variables:
 ### 4. Place Firebase Service Account File
 Ensure `Service-Account.json` is in the project root directory.
 
+## DNS Configuration Requirement
+
+**Important:** Before running the deployment script, ensure that your DNS records are properly configured and have propagated. The domain `sugarmummiesug.online` and `www.sugarmummiesug.online` must point to the VPS IP `13.53.125.194`. DNS propagation can take up to 24-48 hours. You can verify DNS propagation using tools like `dig` or online DNS checkers. The deployment script will attempt to obtain SSL certificates, which will fail if DNS is not correctly set up.
+
 ## Using the Deploy Script
 
 The `deploy.sh` script automates most of the deployment process. Run it with sudo:

@@ -6,3 +6,12 @@ django-filter==23.5
 python-decouple==3.8
 PyJWT==2.8.0
 django-redis==5.4.0
+requests==2.31.0
+redis==5.0.1
+celery==5.3.4
+firebase-admin==6.2.0
+Pillow==10.1.0
+numpy==1.24.3
+channels==4.0.0
+django-channels-jwt-auth-middleware==0.1.0
+psycopg2-binary==2.9.7
