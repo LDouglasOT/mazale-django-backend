@@ -14,7 +14,7 @@ from pathlib import Path
 import os
 import firebase_admin
 from firebase_admin import credentials
-import os
+from decouple import config
 
 # Path to the service account key you just downloaded
 
@@ -35,30 +35,15 @@ if not firebase_admin._apps:
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-+^x&og&y)33u6ugg5ui*gi846hoo5k=ym!96r!a6wdq0=6kgd@'
+SECRET_KEY = config('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='').split(',') if config('ALLOWED_HOSTS') else []
 
 
 # Application definition
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [{
-                "address": "rediss://default:AdGbAAIncDFlNjQ4ZmI2MzZkM2E0M2JlODQ5ZjE2NGQ2ODYyNzA0NHAxNTM2NTk@one-perch-53659.upstash.io:6379",
-                "ssl_cert_reqs": None, # Required for SSL
-            }],
-            "capacity": 2000, 
-            "expiry": 30,
-            "symmetric_encryption_keys": [SECRET_KEY],
-        },
-    },
-}
-
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
@@ -72,10 +57,7 @@ CACHES = {
     }
 }
 
-ASGI_APPLICATION = 'mazale.asgi.application'
-
 INSTALLED_APPS = [
-    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -193,6 +175,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
@@ -258,6 +241,8 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:8080",
+    "https://sugarmummiesug.online",
+    "https://www.sugarmummiesug.online",
     # Add your frontend URLs here
 ]
 
@@ -275,7 +260,7 @@ PASSWORD_HASHERS = [
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-ONESIGNAL_API_KEY = 'os_v2_app_ayawkbpqufhozphwet75dn2f6j4x4vz5ziueuwva5hshw2x6zi3zxs4ljpxttcid5m6mik6mfdgy5xixoh3lxtkvudryvkzx6xsnbli'
+ONESIGNAL_API_KEY = config('ONESIGNAL_API_KEY')
 
 # Celery Configuration
 CELERY_BROKER_URL = 'rediss://default:AdGbAAIncDFlNjQ4ZmI2MzZkM2E0M2JlODQ5ZjE2NGQ2ODYyNzA0NHAxNTM2NTk@one-perch-53659.upstash.io:6379'
@@ -308,3 +293,4 @@ LOGGING = {
         'level': 'INFO',
     },
 }
+
