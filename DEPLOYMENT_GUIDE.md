@@ -46,7 +46,7 @@ Ensure `Service-Account.json` is in the project root directory.
 
 ## DNS Configuration Requirement
 
-**Important:** Before running the deployment script, ensure that your DNS records are properly configured and have propagated. The domain `sugarmummiesug.online` and `www.sugarmummiesug.online` must point to the VPS IP `13.53.125.194`. DNS propagation can take up to 24-48 hours. You can verify DNS propagation using tools like `dig` or online DNS checkers. The deployment script will attempt to obtain SSL certificates, which will fail if DNS is not correctly set up.
+**Important:** Before running the deployment script, ensure that your DNS records are properly configured and have propagated. The domain `sugarmummiesug.online` and `www.sugarmummiesug.online` must point to the VPS IP `13.53.125.194`. DNS propagation can take up 24-48 hours. You can verify DNS propagation using tools like `dig` or online DNS checkers. The deployment script will attempt to obtain SSL certificates, which will fail if DNS is not correctly set up.
 
 ## Using the Deploy Script
 
@@ -62,7 +62,7 @@ sudo ./deploy.sh
 1. **System Updates**: Updates Ubuntu packages
 2. **Install Dependencies**: Installs Python, pip, venv, Nginx, Certbot
 3. **Virtual Environment**: Creates and activates Python virtual environment
-4. **Install Python Packages**: Installs requirements and Gunicorn
+4. **Install Python Packages**: Upgrades pip and setuptools for compatibility, then installs requirements and Gunicorn
 5. **Database Migration**: Runs Django migrations
 6. **Static Files**: Collects static files
 7. **Gunicorn Service**: Creates systemd service for Gunicorn

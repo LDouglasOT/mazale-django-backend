@@ -28,23 +28,21 @@ sudo ln -s /snap/bin/certbot /usr/bin/certbot
 # git clone <repo> mazale
 
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
+# Create virtual environment as ubuntu user
+sudo -u ubuntu python3 -m venv venv
 
-# Install dependencies
-pip install -r requirements.txt
-pip install gunicorn
+# Upgrade pip and install dependencies as ubuntu user
+sudo -u ubuntu bash -c "source venv/bin/activate && pip install --upgrade pip setuptools wheel && pip install -r requirements.txt && pip install gunicorn"
 
 # Create .env file
-cp .env.example .env
+sudo -u ubuntu cp .env.example .env
 # Edit .env with actual values
 
-# Run migrations
-python manage.py migrate
+# Run migrations as ubuntu user
+sudo -u ubuntu bash -c "source venv/bin/activate && python manage.py migrate"
 
-# Collect static files
-python manage.py collectstatic --noinput
+# Collect static files as ubuntu user
+sudo -u ubuntu bash -c "source venv/bin/activate && python manage.py collectstatic --noinput"
 
 # Create systemd service for Gunicorn
 sudo tee /etc/systemd/system/mazale.service > /dev/null <<EOF
