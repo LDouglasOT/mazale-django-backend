@@ -32,7 +32,7 @@ sudo ln -s /snap/bin/certbot /usr/bin/certbot
 sudo -u ubuntu python3 -m venv venv
 
 # Upgrade pip and install dependencies as ubuntu user
-sudo -u ubuntu bash -c "source venv/bin/activate && pip install --upgrade pip setuptools wheel && pip install -r requirements.txt && pip install gunicorn"
+sudo -u ubuntu bash -c "source venv/bin/activate && pip install --upgrade pip setuptools wheel && pip install -r requirements.txt && pip install gunicorn && pip install pillow"
 
 # Create .env file
 sudo -u ubuntu cp .env.example .env
