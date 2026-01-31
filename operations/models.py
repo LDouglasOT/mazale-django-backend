@@ -29,7 +29,7 @@ class UserManager(BaseUserManager):
 
 class User(AbstractBaseUser,PermissionsMixin):
     # Authentication fields
-    phone_number = models.CharField(max_length=20, null=True, blank=True, unique=True)
+    phone_number = models.CharField(max_length=255, null=True, blank=True, unique=True)
     email = models.EmailField(null=True, blank=True, unique=True)
     password = models.CharField(max_length=255)
     token = models.CharField(max_length=255, null=True, blank=True)
@@ -52,8 +52,8 @@ class User(AbstractBaseUser,PermissionsMixin):
     # Personal information
     first_name = models.CharField(max_length=50, null=True, blank=True)
     last_name = models.CharField(max_length=50, null=True, blank=True)
-    day = models.CharField(max_length=2, null=True, blank=True)
-    month = models.CharField(max_length=2, null=True, blank=True)
+    day = models.CharField(max_length=255, null=True, blank=True)
+    month = models.CharField(max_length=255, null=True, blank=True)
     year = models.CharField(max_length=4, null=True, blank=True)
     latitude = models.CharField(max_length=10, null=True, blank=True)
     longitude = models.CharField(max_length=10, null=True, blank=True)
@@ -94,7 +94,7 @@ class User(AbstractBaseUser,PermissionsMixin):
     engagement_score = models.FloatField(default=0, help_text="Overall user engagement score")
     recommendation_boost = models.FloatField(default=1.0, help_text="Boost factor for recommendations")
     last_recommendation_update = models.DateTimeField(null=True, blank=True)
-    activity_level = models.CharField(max_length=20, default='medium', choices=[
+    activity_level = models.CharField(max_length=200, default='medium', choices=[
         ('low', 'Low'),
         ('medium', 'Medium'),
         ('high', 'High'),
@@ -470,7 +470,7 @@ class UserPreferenceProfile(models.Model):
     
     # Behavioral patterns
     avg_session_duration = models.IntegerField(default=0, help_text="Average session in seconds")
-    preferred_time_of_day = models.CharField(max_length=20, default='evening')
+    preferred_time_of_day = models.CharField(max_length=200, default='evening')
     swipe_rate = models.FloatField(default=0) 
     response_rate = models.FloatField(default=0)
     
@@ -491,7 +491,7 @@ class UserPreferenceProfile(models.Model):
 
 class PhoneOTP(models.Model):
     """OTP for phone number verification during registration"""
-    phone_number = models.CharField(max_length=20, unique=True)
+    phone_number = models.CharField(max_length=200, unique=True)
     otp_code = models.CharField(max_length=6)
     verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
