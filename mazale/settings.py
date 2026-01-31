@@ -106,40 +106,21 @@ WSGI_APPLICATION = 'mazale.wsgi.application'
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
 # Database configuration: prefer DATABASE_URL (Postgres) otherwise fall back to SQLite
-DATABASE_URL = os.environ.get('DATABASE_URL')
-if DATABASE_URL:
-    from urllib.parse import urlparse, parse_qs
-
-    url = urlparse(DATABASE_URL)
-    params = parse_qs(url.query)
-
-    # Map query params into OPTIONS (e.g. sslmode)
-    options = {}
-    if 'sslmode' in params:
-        options['sslmode'] = params['sslmode'][-1]
-    if 'channel_binding' in params:
-        options['channel_binding'] = params['channel_binding'][-1]
-
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': url.path[1:],
-            'USER': url.username,
-            'PASSWORD': url.password,
-            'HOST': url.hostname,
-            'PORT': url.port or '',
-            'OPTIONS': options,
-        }
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'neondb',
+        'USER': 'neondb_owner',
+        'PASSWORD': 'npg_ApB5xTVtHiM8',
+        'HOST': 'ep-soft-lake-a496sm5e-pooler.us-east-1.aws.neon.tech',
+        'PORT': '5432',
+        'OPTIONS': {
+            'sslmode': 'require',
+        },
     }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+}
 
-
+    # Map query params into OPTIONS (
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
 

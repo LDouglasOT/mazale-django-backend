@@ -1,50 +1,39 @@
 #!/bin/bash
 
-# Deployment script for Django app on Ubuntu VPS
+# Deployment script for Mazale Django app on Ubuntu VPS
 # Run as root or with sudo
 
-# Update system
+APP_DIR="/home/ubuntu/mazale-django-backend"
+
+# 1. Update system and install dependencies
 sudo apt update && sudo apt upgrade -y
+sudo apt install python3 python3-pip python3-venv nginx snapd -y
 
-# Install Python and pip
-sudo apt install python3 python3-pip python3-venv -y
-
-# Install Nginx
-sudo apt install nginx -y
-
-# Install Redis (if not using managed)
-# sudo apt install redis-server -y
-
-# Install Certbot for SSL
-sudo apt install snapd -y
+# 2. Setup Certbot for SSL
 sudo snap install core; sudo snap refresh core
 sudo snap install --classic certbot
-sudo ln -s /snap/bin/certbot /usr/bin/certbot
+[ -f /usr/bin/certbot ] || sudo ln -s /snap/bin/certbot /usr/bin/certbot
 
-# Create app directory (if not cloned)
-# cd /var/www
-# sudo mkdir mazale
-# sudo chown ubuntu:ubuntu mazale
-# git clone <repo> mazale
+# 3. FIX PERMISSIONS (Crucial: Allows Nginx to access the socket)
+sudo chmod 755 /home/ubuntu
+sudo chown -R ubuntu:www-data $APP_DIR
 
+# 4. Create virtual environment and logs directory as ubuntu user
+sudo -u ubuntu python3 -m venv $APP_DIR/venv
+sudo -u ubuntu mkdir -p $APP_DIR/logs
 
-# Create virtual environment as ubuntu user
-sudo -u ubuntu python3 -m venv venv
+# 5. Install dependencies
+# Using numpy>=1.26.0 for Python 3.12+ support
+sudo -u ubuntu bash -c "source $APP_DIR/venv/bin/activate && \
+    pip install --upgrade pip setuptools wheel && \
+    pip install 'numpy>=1.26.0' Pillow gunicorn python-decouple && \
+    pip install -r $APP_DIR/requirements.txt"
 
-# Upgrade pip and install dependencies as ubuntu user
-sudo -u ubuntu bash -c "source venv/bin/activate && pip install --upgrade pip setuptools wheel && pip install -r requirements.txt && pip install gunicorn"
+# 6. Django Tasks
+sudo -u ubuntu bash -c "source $APP_DIR/venv/bin/activate && python $APP_DIR/manage.py migrate --noinput"
+sudo -u ubuntu bash -c "source $APP_DIR/venv/bin/activate && python $APP_DIR/manage.py collectstatic --noinput"
 
-# Create .env file
-sudo -u ubuntu cp .env.example .env
-# Edit .env with actual values
-
-# Run migrations as ubuntu user
-sudo -u ubuntu bash -c "source venv/bin/activate && python manage.py migrate"
-
-# Collect static files as ubuntu user
-sudo -u ubuntu bash -c "source venv/bin/activate && python manage.py collectstatic --noinput"
-
-# Create systemd service for Gunicorn
+# 7. Create systemd service for Gunicorn
 sudo tee /etc/systemd/system/mazale.service > /dev/null <<EOF
 [Unit]
 Description=Mazale Django App
@@ -52,49 +41,55 @@ After=network.target
 
 [Service]
 User=ubuntu
-Group=ubuntu
-WorkingDirectory=/home/ubuntu/mazale-django-backend
-Environment="PATH=/home/ubuntu/mazale-django-backend/venv/bin"
-ExecStart=/home/ubuntu/mazale-django-backend/venv/bin/gunicorn --workers 3 --bind unix:/home/ubuntu/mazale-django-backend/mazale.sock mazale.wsgi:application
+Group=www-data
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$APP_DIR/.env
+# Removes stale socket before starting
+ExecStartPre=/usr/bin/rm -f $APP_DIR/mazale.sock
+ExecStart=$APP_DIR/venv/bin/gunicorn \\
+    --access-logfile $APP_DIR/logs/access.log \\
+    --error-logfile $APP_DIR/logs/error.log \\
+    --log-level info \\
+    --workers 3 \\
+    --bind unix:$APP_DIR/mazale.sock \\
+    mazale.wsgi:application
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-sudo systemctl daemon-reload
-sudo systemctl start mazale
-sudo systemctl enable mazale
-
-# Configure Nginx
+# 8. Configure Nginx
 sudo tee /etc/nginx/sites-available/mazale > /dev/null <<EOF
 server {
     listen 80;
     server_name sugarmummiesug.online www.sugarmummiesug.online 13.53.125.194;
 
     location = /favicon.ico { access_log off; log_not_found off; }
+    
     location /static/ {
-        alias /home/ubuntu/mazale-django-backend/staticfiles/;
+        alias $APP_DIR/staticfiles/;
     }
 
     location /media/ {
-        alias /home/ubuntu/mazale-django-backend/media/;
+        alias $APP_DIR/media/;
     }
 
     location / {
         include proxy_params;
-        proxy_pass http://unix:/home/ubuntu/mazale-django-backend/mazale.sock;
+        proxy_pass http://unix:$APP_DIR/mazale.sock;
     }
 }
 EOF
 
-sudo ln -s /etc/nginx/sites-available/mazale /etc/nginx/sites-enabled
+# 9. Enable and Restart Services
+sudo ln -sf /etc/nginx/sites-available/mazale /etc/nginx/sites-enabled
 sudo nginx -t
-sudo systemctl reload nginx
+sudo systemctl daemon-reload
+sudo systemctl enable mazale
+sudo systemctl restart mazale
+sudo systemctl restart nginx
 
-# Get SSL certificate
-sudo certbot --nginx -d sugarmummiesug.online -d www.sugarmummiesug.online
+# 10. SSL (Uncomment after verifying the site works on HTTP)
+# sudo certbot --nginx -d sugarmummiesug.online -d www.sugarmummiesug.online --non-interactive --agree-tos -m admin@sugarmummiesug.online
 
-# Set up Celery (if needed)
-# Create celery.service and celerybeat.service similar to gunicorn
-
-echo "Deployment complete. Check logs with: sudo journalctl -u mazale"
+echo "Deployment complete. Check logs at $APP_DIR/logs/error.log"
