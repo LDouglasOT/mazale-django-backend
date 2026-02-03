@@ -1,0 +1,17 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main  # Trigger only when pushing to the main branch
+
+jobs:
+  ping-deploy-webhook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Webhook
+        uses: joelwmale/webhook-action@master
+        with:
+          url: "https://sugarmummiesug.online/api/deploy-webhook-secret-abc123/"
+          headers: '{"Content-Type": "application/json"}'
+          body: '{"ref": "${{ github.ref }}", "commit": "${{ github.sha }}"}'
