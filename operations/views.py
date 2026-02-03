@@ -1732,7 +1732,15 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse, HttpResponseForbidden
 from django.conf import settings
 
-@csrf_exempt  # This is MANDATORY to stop the 403
+import hmac
+import hashlib
+import subprocess
+import os
+from django.conf import settings
+from django.http import HttpResponse, HttpResponseForbidden
+from django.views.decorators.csrf import csrf_exempt
+
+@csrf_exempt
 def deploy_webhook(request):
     # 1. Look for the GitHub signature
     signature = request.META.get('HTTP_X_HUB_SIGNATURE_256')
@@ -1742,8 +1750,10 @@ def deploy_webhook(request):
         return HttpResponseForbidden("Permission denied.")
 
     # 2. Validate the signature
-    # GitHub sends it as 'sha256=abcdef123...'
-    sha_name, signature_hash = signature.split('=')
+    try:
+        sha_name, signature_hash = signature.split('=')
+    except ValueError:
+        return HttpResponseForbidden("Invalid signature format.")
     
     mac = hmac.new(
         settings.GITHUB_WEBHOOK_SECRET.encode(), 
@@ -1755,13 +1765,36 @@ def deploy_webhook(request):
         print("DEBUG: Signature Mismatch")
         return HttpResponseForbidden("Invalid signature.")
 
-    # 3. If it passes, run your deploy script
-    print("🚀 SIGNATURE VALID: Deploying now...")
-    # Add your subprocess commands here
+    # 3. SIGNATURE VALID: Run the Deployment Commands
+    print("🚀 SIGNATURE VALID: Starting Deployment Script...")
     
-    return HttpResponse("OK", status=200)
+    # Define your project directory (The folder containing manage.py)
+    project_path = "/home/ubuntu/mazale-django-backend"
+    
+    try:
+        # STEP A: Pull latest code
+        subprocess.run(["git", "pull", "origin", "main"], cwd=project_path, check=True)
+        
+        # STEP B: Update requirements (using the venv pip)
+        subprocess.run([f"{project_path}/venv/bin/pip", "install", "-r", "requirements.txt"], cwd=project_path, check=True)
+        
+        # STEP C: Run Migrations
+        subprocess.run([f"{project_path}/venv/bin/python", "manage.py", "migrate"], cwd=project_path, check=True)
+        
+        # STEP D: Restart Gunicorn (Mazale Service)
+        # IMPORTANT: Requires the 'visudo' rule we discussed!
+        subprocess.run(["sudo", "systemctl", "restart", "mazale"], check=True)
+        
+        # STEP E: Restart Node.js app via PM2
+        subprocess.run(["pm2", "restart", "all"], check=True)
+        
+        print("✅ DEPLOYMENT COMPLETE: Services restarted.")
+        return HttpResponse("Deployment Successful", status=200)
 
-# Helper function to ensure bytes
+    except subprocess.CalledProcessError as e:
+        print(f"❌ DEPLOYMENT FAILED: Error at command {e.cmd}")
+        return HttpResponse(f"Deployment Failed: {str(e)}", status=500)
+
 def force_bytes(s):
     if isinstance(s, bytes): return s
     return s.encode('utf-8')
