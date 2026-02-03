@@ -63,7 +63,7 @@ def send_sms_native(mobile, message, senderid="Mazale", schedule=None, unicode=N
 
     try:
         response = requests.get(full_url)
-
+        print(response)
         # Check response codes as per SmsNative documentation
         if "1111" in response.text:
             return {
@@ -586,7 +586,7 @@ class ConversationListView(APIView):
     def post(self, request):
         """Create or get existing conversation"""
         participant_ids = request.data.get('participants', [])
-        if len(participant_ids)>1:
+        if len(participant_ids) < 1:
             return Response({'error': 'Conversation must have 2 participants'}, status=status.HTTP_400_BAD_REQUEST)
         if request.user.id not in participant_ids:
             participant_ids.append(request.user.id)
