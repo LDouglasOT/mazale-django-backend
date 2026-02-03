@@ -1680,10 +1680,6 @@ class SocketHandshakeView(APIView):
     
 class SMSDeliveryEngine(APIView):
     def post(self, request):
-        """
-        Sends an SMS via SmsNative HTTP API following their documentation.
-        Supports all parameters: mobile, message, senderid, schedule, unicode, group_id
-        """
         mobile = request.data.get("mobile")
         message = request.data.get("message")
         senderid = request.data.get("senderid", "Mazale")
