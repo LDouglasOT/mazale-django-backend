@@ -1736,41 +1736,39 @@ from django.http import HttpResponse, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-@csrf_exempt
-@require_POST
+import hmac, hashlib
+from django.views.decorators.csrf import csrf_exempt
+from django.http import HttpResponse, HttpResponseForbidden
+from django.conf import settings
+
+@csrf_exempt  # This is MANDATORY to stop the 403
 def deploy_webhook(request):
-    # 1. Verify the signature from GitHub
-    header_signature = request.META.get('HTTP_X_HUB_SIGNATURE_256')
-    if not header_signature:
+    # 1. Look for the GitHub signature
+    signature = request.META.get('HTTP_X_HUB_SIGNATURE_256')
+    
+    if not signature:
+        print("DEBUG: Missing Signature")
         return HttpResponseForbidden("Permission denied.")
 
-    sha_name, signature = header_signature.split('=')
-    if sha_name != 'sha256':
-        return HttpResponseForbidden("Hash algorithm not supported.")
-
-    # Use a secret key from your settings.py
-    # GITHUB_WEBHOOK_SECRET = 'your_strong_secret'
-    mac = hmac.new(force_bytes(settings.GITHUB_WEBHOOK_SECRET), msg=request.body, digestmod=hashlib.sha256)
+    # 2. Validate the signature
+    # GitHub sends it as 'sha256=abcdef123...'
+    sha_name, signature_hash = signature.split('=')
     
-    if not hmac.compare_digest(force_bytes(mac.hexdigest()), force_bytes(signature)):
+    mac = hmac.new(
+        settings.GITHUB_WEBHOOK_SECRET.encode(), 
+        msg=request.body, 
+        digestmod=hashlib.sha256
+    )
+    
+    if not hmac.compare_digest(mac.hexdigest(), signature_hash):
+        print("DEBUG: Signature Mismatch")
         return HttpResponseForbidden("Invalid signature.")
 
-    # 2. If signature is valid, run the deployment
-    project_path = "/home/ubuntu/mazale-django-backend"
-    try:
-        # Run the same restart commands we discussed
-        subprocess.run(["git", "pull", "origin", "main"], cwd=project_path, check=True)
-        subprocess.run(["pip", "install", "-r", "requirements.txt"], cwd=project_path, check=True)
-        subprocess.run(["python3", "manage.py", "migrate"], cwd=project_path, check=True)
-        subprocess.run(["python3", "manage.py", "collectstatic", "--noinput"], cwd=project_path, check=True)
-        
-        # Restart Gunicorn/Mazale and Node app
-        subprocess.run(["sudo", "systemctl", "restart", "mazale"], check=True)
-        subprocess.run(["pm2", "restart", "all"], check=True)
-        
-        return HttpResponse("Deployment successful", status=200)
-    except subprocess.CalledProcessError as e:
-        return HttpResponse(f"Deployment failed: {str(e)}", status=500)
+    # 3. If it passes, run your deploy script
+    print("🚀 SIGNATURE VALID: Deploying now...")
+    # Add your subprocess commands here
+    
+    return HttpResponse("OK", status=200)
 
 # Helper function to ensure bytes
 def force_bytes(s):
