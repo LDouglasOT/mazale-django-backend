@@ -276,3 +276,7 @@ LOGGING = {
 }
 
 GITHUB_WEBHOOK_SECRET = 'MazalePayload'
+CSRF_TRUSTED_ORIGINS = [
+    'https://sugarmummiesug.online',
+    'https://www.sugarmummiesug.online'
+]
