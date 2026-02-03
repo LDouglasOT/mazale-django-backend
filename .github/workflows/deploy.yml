@@ -3,15 +3,17 @@ name: Deploy to Production
 on:
   push:
     branches:
-      - main  # Trigger only when pushing to the main branch
+      - main
 
 jobs:
-  ping-deploy-webhook:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Webhook
-        uses: joelwmale/webhook-action@master
+      - name: Trigger Webhook with Signature
+        uses: distributhor/workflow-webhook@v3
         with:
-          url: "https://sugarmummiesug.online/api/deploy-webhook-secret-abc123/"
-          headers: '{"Content-Type": "application/json"}'
-          body: '{"ref": "${{ github.ref }}", "commit": "${{ github.sha }}"}'
+          webhook_url: "https://sugarmummiesug.online/api/deploy-webhook-secret-abc123/"
+          # Match the name you created in GitHub Secrets exactly
+          webhook_secret: ${{ secrets.MazalePayload }}
+          # This JSON must be exactly what the Django view signs
+          data: '{"status": "deploying"}'
