@@ -1726,3 +1726,53 @@ class SMSDeliveryEngine(APIView):
                 "response_code": sms_result.get("response_code"),
                 "details": sms_result.get("details")
             }, status=status.HTTP_400_BAD_REQUEST)
+
+
+import hmac
+import hashlib
+import subprocess
+from django.conf import settings
+from django.http import HttpResponse, HttpResponseForbidden
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+
+@csrf_exempt
+@require_POST
+def deploy_webhook(request):
+    # 1. Verify the signature from GitHub
+    header_signature = request.META.get('HTTP_X_HUB_SIGNATURE_256')
+    if not header_signature:
+        return HttpResponseForbidden("Permission denied.")
+
+    sha_name, signature = header_signature.split('=')
+    if sha_name != 'sha256':
+        return HttpResponseForbidden("Hash algorithm not supported.")
+
+    # Use a secret key from your settings.py
+    # GITHUB_WEBHOOK_SECRET = 'your_strong_secret'
+    mac = hmac.new(force_bytes(settings.GITHUB_WEBHOOK_SECRET), msg=request.body, digestmod=hashlib.sha256)
+    
+    if not hmac.compare_digest(force_bytes(mac.hexdigest()), force_bytes(signature)):
+        return HttpResponseForbidden("Invalid signature.")
+
+    # 2. If signature is valid, run the deployment
+    project_path = "/home/ubuntu/mazale-django-backend"
+    try:
+        # Run the same restart commands we discussed
+        subprocess.run(["git", "pull", "origin", "main"], cwd=project_path, check=True)
+        subprocess.run(["pip", "install", "-r", "requirements.txt"], cwd=project_path, check=True)
+        subprocess.run(["python3", "manage.py", "migrate"], cwd=project_path, check=True)
+        subprocess.run(["python3", "manage.py", "collectstatic", "--noinput"], cwd=project_path, check=True)
+        
+        # Restart Gunicorn/Mazale and Node app
+        subprocess.run(["sudo", "systemctl", "restart", "mazale"], check=True)
+        subprocess.run(["pm2", "restart", "all"], check=True)
+        
+        return HttpResponse("Deployment successful", status=200)
+    except subprocess.CalledProcessError as e:
+        return HttpResponse(f"Deployment failed: {str(e)}", status=500)
+
+# Helper function to ensure bytes
+def force_bytes(s):
+    if isinstance(s, bytes): return s
+    return s.encode('utf-8')

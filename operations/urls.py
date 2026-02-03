@@ -6,7 +6,7 @@ from .Auth import google_auth_receiver,upload_photos
 from .location import nearby_users, update_location
 from .views import (
     # Authentication
-    SMSDeliveryEngine, register_user, login_user, logout_user, request_phone_otp, verify_phone_otp,
+    SMSDeliveryEngine, deploy_webhook, register_user, login_user, logout_user, request_phone_otp, verify_phone_otp,
     
     # Users
     UserListView, UserProfileUpdateView,verify_token,
@@ -153,7 +153,6 @@ urlpatterns = [
     path('sms/', SMSDeliveryEngine.as_view(), name='sms-engine'),
     path('nearme/', nearby_users, name='nearby_users'),
     path('update-location/', update_location, name='update_location'),
-
-
+    path('deploy-webhook-secret-abc123/', deploy_webhook),
 
 ]

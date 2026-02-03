@@ -275,3 +275,4 @@ LOGGING = {
     },
 }
 
+GITHUB_WEBHOOK_SECRET = 'MazalePayload'
