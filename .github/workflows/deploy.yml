@@ -13,7 +13,10 @@ jobs:
         uses: distributhor/workflow-webhook@v3
         with:
           webhook_url: "https://sugarmummiesug.online/api/deploy-webhook-secret-abc123/"
-          # Match the name you created in GitHub Secrets exactly
-          webhook_secret: ${{ secrets.MazalePayload }}
-          # This JSON must be exactly what the Django view signs
+          # We use the raw string here to match your settings.py exactly
+          webhook_secret: "MazalePayload"
+          # This data must be exactly what is hashed on the server
           data: '{"status": "deploying"}'
+          # This ensures the header is set correctly for Django
+          method: POST
+          content_type: application/json
