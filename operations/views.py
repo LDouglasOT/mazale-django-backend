@@ -1784,10 +1784,7 @@ def deploy_webhook(request):
     try:
         # STEP A: Pull latest code
         subprocess.run(["git", "pull", "origin", "main"], cwd=project_path, check=True)
-        
-        # STEP B: Update requirements
-        subprocess.run([pip_bin, "install", "-r", "requirements.txt"], cwd=project_path, check=True)
-        
+                
         # STEP C: Run Migrations
         subprocess.run([python_bin, "manage.py", "migrate"], cwd=project_path, check=True)
         
