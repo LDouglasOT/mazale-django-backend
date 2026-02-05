@@ -1793,9 +1793,6 @@ def deploy_webhook(request):
         
         # STEP E: Restart Node.js app via PM2
         subprocess.run(["pm2", "restart", "all"], check=True)
-
-        # STEP F: Restart Celery (Background Worker)
-        # Added this line to restart your celery service
         print("⚙️ Restarting Celery worker...")
         subprocess.run(["sudo", "systemctl", "restart", "mazale"], check=True)
         
