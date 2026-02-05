@@ -1740,6 +1740,14 @@ from django.conf import settings
 from django.http import HttpResponse, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 
+import hmac
+import hashlib
+import subprocess
+import os
+from django.conf import settings
+from django.http import HttpResponse, HttpResponseForbidden
+from django.views.decorators.csrf import csrf_exempt
+
 @csrf_exempt
 def deploy_webhook(request):
     # 1. Look for the GitHub signature
@@ -1768,27 +1776,33 @@ def deploy_webhook(request):
     # 3. SIGNATURE VALID: Run the Deployment Commands
     print("🚀 SIGNATURE VALID: Starting Deployment Script...")
     
-    # Define your project directory (The folder containing manage.py)
+    # Configuration
     project_path = "/home/ubuntu/mazale-django-backend"
+    python_bin = f"{project_path}/venv/bin/python"
+    pip_bin = f"{project_path}/venv/bin/pip"
     
     try:
         # STEP A: Pull latest code
         subprocess.run(["git", "pull", "origin", "main"], cwd=project_path, check=True)
         
-        # STEP B: Update requirements (using the venv pip)
-        subprocess.run([f"{project_path}/venv/bin/pip", "install", "-r", "requirements.txt"], cwd=project_path, check=True)
+        # STEP B: Update requirements
+        subprocess.run([pip_bin, "install", "-r", "requirements.txt"], cwd=project_path, check=True)
         
         # STEP C: Run Migrations
-        subprocess.run([f"{project_path}/venv/bin/python", "manage.py", "migrate"], cwd=project_path, check=True)
+        subprocess.run([python_bin, "manage.py", "migrate"], cwd=project_path, check=True)
         
-        # STEP D: Restart Gunicorn (Mazale Service)
-        # IMPORTANT: Requires the 'visudo' rule we discussed!
+        # STEP D: Restart Gunicorn (Django Service)
         subprocess.run(["sudo", "systemctl", "restart", "mazale"], check=True)
         
         # STEP E: Restart Node.js app via PM2
         subprocess.run(["pm2", "restart", "all"], check=True)
+
+        # STEP F: Restart Celery (Background Worker)
+        # Added this line to restart your celery service
+        print("⚙️ Restarting Celery worker...")
+        subprocess.run(["sudo", "systemctl", "restart", "mazale"], check=True)
         
-        print("✅ DEPLOYMENT COMPLETE: Services restarted.")
+        print("✅ DEPLOYMENT COMPLETE: All services (Django, Node, Celery) restarted.")
         return HttpResponse("Deployment Successful", status=200)
 
     except subprocess.CalledProcessError as e:
