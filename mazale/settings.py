@@ -23,12 +23,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 service_account_path = os.path.join(BASE_DIR, 'Service-Account.json')
 
-if not firebase_admin._apps:
-    cred = credentials.Certificate(service_account_path)
-    firebase_admin.initialize_app(cred, {
-        # This one line enables Storage alongside Auth
-        'storageBucket': 'twinbrook-12f84.appspot.com'
-    })
+# Firebase initialization (wrapped for Vercel compatibility)
+try:
+    if os.path.exists(service_account_path) and not firebase_admin._apps:
+        cred = credentials.Certificate(service_account_path)
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': 'twinbrook-12f84.appspot.com'
+        })
+except Exception as e:
+    print(f"Firebase initialization skipped: {e}")
 
     
 # Quick-start development settings - unsuitable for production
@@ -37,10 +40,21 @@ if not firebase_admin._apps:
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = config('SECRET_KEY')
 
+# Detect if running on Vercel
+import socket
+is_vercel = socket.gethostname() in ['vercel'] or os.environ.get('VERCEL', '')
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='').split(',') if config('ALLOWED_HOSTS') else []
+# Vercel provides VERCEL_URL for the deployment URL
+vercel_url = os.environ.get('VERCEL_URL', '')
+default_hosts = ['sugarmummiesug.online', 'www.sugarmummiesug.online', 'localhost', '127.0.0.1']
+if vercel_url:
+    default_hosts.append(vercel_url)
+    default_hosts.append(f'https://{vercel_url}')
+
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default=','.join(default_hosts)).split(',') if config('ALLOWED_HOSTS') else default_hosts
 
 
 # Application definition
@@ -219,13 +233,20 @@ SIMPLE_JWT = {
 }
 
 # CORS Configuration (if using frontend from different domain)
-CORS_ALLOWED_ORIGINS = [
+# Add Vercel URLs dynamically
+cors_origins = [
     "http://localhost:3000",
     "http://localhost:8080",
     "https://sugarmummiesug.online",
     "https://www.sugarmummiesug.online",
-    # Add your frontend URLs here
 ]
+
+# Add Vercel preview/deployment URLs if running on Vercel
+if vercel_url:
+    cors_origins.append(f'https://{vercel_url}')
+    cors_origins.append(f'https://*.vercel.app')
+
+CORS_ALLOWED_ORIGINS = cors_origins
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -276,7 +297,14 @@ LOGGING = {
 }
 
 GITHUB_WEBHOOK_SECRET = 'MazalePayload'
-CSRF_TRUSTED_ORIGINS = [
+
+# CSRF trusted origins - add Vercel URLs
+csrf_origins = [
     'https://sugarmummiesug.online',
     'https://www.sugarmummiesug.online'
 ]
+if vercel_url:
+    csrf_origins.append(f'https://{vercel_url}')
+    csrf_origins.append('https://*.vercel.app')
+
+CSRF_TRUSTED_ORIGINS = csrf_origins

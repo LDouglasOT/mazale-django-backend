@@ -3,33 +3,14 @@ ASGI config for mazale project.
 
 It exposes the ASGI callable as a module-level variable named ``application``.
 
-For more information on this file, see
-https://docs.djangoproject.com/en/4.2/howto/deployment/asgi/
+Note: Django Channels (WebSocket) has been removed since real-time 
+functionality is now handled by the Node.js application.
 """
 
 import os
-from channels.routing import ProtocolTypeRouter, URLRouter
-from channels.auth import AuthMiddlewareStack
-from channels.security.websocket import AllowedHostsOriginValidator
-from django_channels_jwt_auth_middleware.auth import JWTAuthMiddlewareStack
 
 from django.core.asgi import get_asgi_application
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'mazale.settings')
 
-django_application = get_asgi_application()
-
-application = ProtocolTypeRouter({
-    "http": django_application,
-    "websocket": AllowedHostsOriginValidator(
-        JWTAuthMiddlewareStack(
-            URLRouter(
-                # Import your websocket routing here
-                []
-            )
-        )
-    ),
-})
-
-
-
+application = get_asgi_application()
